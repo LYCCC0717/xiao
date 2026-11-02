@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#08070a">
+  <meta name="robots" content="noindex, nofollow">
+  <title>我们 · A Living Archive of Two</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="is-locked">
+
+  <!-- 全局背景：粒子与光标光晕 -->
+  <canvas id="water" aria-hidden="true"></canvas>
+  <canvas id="particles" aria-hidden="true"></canvas>
+  <div class="cursor-glow" aria-hidden="true"></div>
+  <div class="grain" aria-hidden="true"></div>
+
+  <!-- ============ 入口 ============ -->
+  <div id="intro" class="intro" role="dialog" aria-label="入口">
+    <div class="intro__orbit" aria-hidden="true">
+      <span class="ring ring--1"></span>
+      <span class="ring ring--2"></span>
+      <span class="ring ring--3"></span>
+      <span class="halo"></span>
+    </div>
+    <div class="intro__content">
+      <h1 class="intro__title shine" data-text="我们">我们</h1>
+      <p class="intro__sub">A LIVING ARCHIVE OF TWO</p>
+      <button id="enterBtn" class="glass glass--btn intro__btn" type="button">
+        <span>进入展馆</span><i aria-hidden="true">→</i>
+      </button>
+    </div>
+  </div>
+
+  <!-- ============ 导航 ============ -->
+  <header class="nav" id="nav">
+    <a class="nav__logo" href="#hall">我们</a>
+    <nav class="nav__plates glass" id="navPlates" aria-label="展厅导航">
+      <a href="#hall"     data-sec="hall">大厅</a>
+      <a href="#stories"  data-sec="stories">故事</a>
+      <a href="#timeline" data-sec="timeline">时间线</a>
+      <a href="#photos"   data-sec="photos">照片</a>
+      <a href="#dates"    data-sec="dates">纪念日</a>
+      <a href="#map"      data-sec="map">地图</a>
+    </nav>
+    <div class="nav__right">
+      <button id="musicBtn" class="glass music" type="button" aria-label="暂停音乐">
+        <span class="music__bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span class="music__name" id="musicName"></span>
+      </button>
+      <button id="menuBtn" class="glass menu-btn" type="button" aria-label="打开导航" aria-expanded="false">
+        <span></span><span></span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+
+    <!-- ============ 大厅 ============ -->
+    <section id="hall" class="sec hall" data-sec="hall">
+      <div class="hall__sculpture" aria-hidden="true" data-depth="-0.18">
+        <div class="sculpt sculpt--a glass"></div>
+        <div class="sculpt sculpt--b glass"></div>
+        <div class="sculpt sculpt--c" data-depth="-0.12"></div>
+        <div class="sculpt__orbit"></div>
+      </div>
+      <div class="hall__text reveal" data-depth="0.08">
+        <p class="label">THE GRAND HALL · 大厅</p>
+        <h2 class="hall__title">一座只属于<br>两个人的展馆</h2>
+        <p class="hall__desc">这里收藏的每一件展品，都来自我们真实走过的日子。</p>
+        <div class="hall__count glass">
+          <span class="label">TOGETHER FOR</span>
+          <strong id="daysTogether" class="num">0</strong>
+          <span class="hall__unit">天</span>
+        </div>
+      </div>
+      <a class="scroll-hint" href="#stories" aria-label="向下参观"><span></span>向下参观</a>
+    </section>
+
+    <!-- ============ 故事展品区 ============ -->
+    <section id="stories" class="sec stories" data-sec="stories">
+      <header class="sec__head reveal" data-depth="0.12">
+        <p class="label">GALLERY I · EXHIBITS</p>
+        <h2 class="sec__title">故事展品</h2>
+        <p class="sec__desc">每一段经历，都是一件被认真收藏的作品。</p>
+      </header>
+      <div class="theme-tabs glass" id="themeTabs" role="tablist"></div>
+      <div class="exhibits" id="exhibits"></div>
+    </section>
+
+    <!-- ============ 时间长廊 ============ -->
+    <section id="timeline" class="sec timeline" data-sec="timeline">
+      <header class="sec__head reveal" data-depth="0.12">
+        <p class="label">GALLERY II · CORRIDOR OF TIME</p>
+        <h2 class="sec__title">时间长廊</h2>
+        <p class="sec__desc">沿着这条光走下去，就是我们。</p>
+      </header>
+      <div class="corridor" id="corridor">
+        <div class="corridor__track" id="corridorTrack">
+          <div class="corridor__rail" aria-hidden="true"><i id="railFill"></i></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 环形胶片墙 ============ -->
+    <section id="photos" class="sec photos" data-sec="photos">
+      <header class="sec__head reveal" data-depth="0.12">
+        <p class="label">GALLERY III · FILM WALL</p>
+        <h2 class="sec__title">胶片墙</h2>
+        <p class="sec__desc">点一张照片，走进那一天。</p>
+      </header>
+      <div class="film-stage" id="filmStage" data-depth="-0.06">
+        <div class="film-ring" id="filmRing"></div>
+      </div>
+      <p class="film-tip">拖动旋转 · 点击放大</p>
+    </section>
+
+    <!-- ============ 纪念日长廊 ============ -->
+    <section id="dates" class="sec dates" data-sec="dates">
+      <header class="sec__head reveal" data-depth="0.12">
+        <p class="label">GALLERY IV · PLAQUES</p>
+        <h2 class="sec__title">纪念日长廊</h2>
+        <p class="sec__desc">有些日子值得被刻在墙上。</p>
+      </header>
+      <div class="plaques" id="plaques"></div>
+    </section>
+
+    <!-- ============ 发光地图 ============ -->
+    <section id="map" class="sec map" data-sec="map">
+      <header class="sec__head reveal" data-depth="0.12">
+        <p class="label">GALLERY V · CONSTELLATION</p>
+        <h2 class="sec__title">我们去过的地方，<br class="m-br">连成一条光。</h2>
+      </header>
+      <div class="map-frame glass" id="mapFrame">
+        <svg class="map-svg" id="mapSvg" role="img" aria-label="我们去过的地方"></svg>
+        <div class="map-card glass" id="mapCard" hidden></div>
+      </div>
+    </section>
+
+    <!-- ============ 结尾 ============ -->
+    <section id="ending" class="sec ending" data-sec="ending">
+      <svg class="ending__lines" id="endingLines" aria-hidden="true" data-depth="-0.25"></svg>
+      <div class="ending__inner">
+        <div class="unfinished glass reveal" id="unfinished"></div>
+        <div class="ending__text" id="endingText"></div>
+        <a href="#hall" class="glass glass--btn reveal" id="backHall"><span>回到大厅</span><i aria-hidden="true">↑</i></a>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ 故事 / 照片 详情层 ============ -->
+  <div class="viewer" id="viewer" hidden>
+    <div class="viewer__bg" data-close></div>
+    <article class="viewer__panel glass" role="dialog" aria-modal="true" id="viewerPanel">
+      <button class="viewer__close" type="button" data-close aria-label="关闭">×</button>
+      <div class="viewer__body" id="viewerBody"></div>
+    </article>
+  </div>
+
+  <audio id="bgm" loop preload="none"></audio>
+
+  <script src="js/water.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
