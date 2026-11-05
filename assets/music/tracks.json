@@ -1,0 +1,44 @@
+[
+  {
+    "file": "01-first-light.wav",
+    "title": "初见的光",
+    "duration": 59.86,
+    "bpm": 70,
+    "meter": 4
+  },
+  {
+    "file": "02-slow-afternoon.wav",
+    "title": "慢慢的午后",
+    "duration": 50.0,
+    "bpm": 64,
+    "meter": 3
+  },
+  {
+    "file": "03-under-one-umbrella.wav",
+    "title": "同一把伞",
+    "duration": 55.53,
+    "bpm": 76,
+    "meter": 4
+  },
+  {
+    "file": "04-evening-by-the-sea.wav",
+    "title": "海边的晚风",
+    "duration": 48.64,
+    "bpm": 66,
+    "meter": 3
+  },
+  {
+    "file": "05-a-letter-to-you.wav",
+    "title": "写给你的信",
+    "duration": 58.33,
+    "bpm": 72,
+    "meter": 4
+  },
+  {
+    "file": "06-tomorrow-with-you.wav",
+    "title": "明天也和你",
+    "duration": 61.47,
+    "bpm": 68,
+    "meter": 4
+  }
+]

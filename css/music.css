@@ -1,0 +1,117 @@
+/* Left-hand listening corner. Content reserves this rail in style.css. */
+.gramophone {
+  position: fixed;
+  left: max(12px, env(safe-area-inset-left));
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 12;
+  width: 152px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: #473125;
+  text-transform: none;
+}
+.gramophone__instrument { width: 152px; height: 160px; pointer-events: none; filter: drop-shadow(0 8px 8px #5e3c2517); }
+.gramophone__instrument svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.gramophone__record { transform-origin: 0 0; animation: gramophone-spin 7s linear infinite; animation-play-state: paused; }
+.gramophone__horn { transform-box: fill-box; transform-origin: 88% 90%; animation: gramophone-sway 3.8s ease-in-out infinite; animation-play-state: paused; }
+.gramophone.is-playing .gramophone__record, .gramophone.is-playing .gramophone__horn { animation-play-state: running; }
+.gramophone__play {
+  --gr: 50%;
+  --gtint: 239, 146, 65;
+  --ga: .74;
+  --gi: .36;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 72px;
+  width: 72px;
+  margin-top: 10px;
+  padding: 18px;
+  border: 1px solid #d9814270;
+  color: #3b261b;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  box-shadow: inset 0 1px 0 #fff9eac7, inset 0 -1px 0 #b46b3e40, 0 5px 15px #a45b2929;
+}
+.gramophone__pause-icon { display: none; }
+.gramophone__play svg { width: 22px; height: 22px; flex: 0 0 auto; }
+.gramophone__play-label { display: none; }
+.gramophone.is-playing .gramophone__play-icon { display: none; }
+.gramophone.is-playing .gramophone__pause-icon { display: block; }
+.gramophone.is-buffering .gramophone__play-icon { opacity: .45; }
+.gramophone__list-toggle { width: 100%; min-height: 48px; margin-top: 10px; padding: 4px 2px; text-align: center; border-radius: 12px; }
+.gramophone__track-name { display: block; font-size: 10px; color: #665240; letter-spacing: .04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gramophone__list-hint { display: block; margin-top: 5px; font-size: 8px; letter-spacing: .08em; color: #89715b; }
+.gramophone__list-toggle:hover { background: #fff8df70; }
+.gramophone__list-toggle:focus-visible { outline: 2px solid #ba6f35; outline-offset: 3px; }
+.gramophone__playlist {
+  --gr: 26px;
+  --ga: .84;
+  --gtint: 255, 247, 225;
+  position: fixed;
+  inset: 50% auto auto 188px;
+  transform: translateY(-50%);
+  width: min(360px, calc(100vw - 208px));
+  max-width: none;
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  margin: 0;
+  padding: 24px;
+  color: #473125;
+  border: 1px solid #fff8eac9;
+  letter-spacing: .02em;
+}
+.gramophone__playlist::backdrop { background: #38271d23; backdrop-filter: blur(3px); }
+.gramophone__playlist-head { display: flex; align-items: flex-start; gap: 14px; justify-content: space-between; }
+.gramophone__playlist-head p { margin: 0 0 10px; font-size: 8px; letter-spacing: .2em; color: #977c5c; }
+.gramophone__playlist-head h2 { margin: 0; font-size: 17px; line-height: 1.55; letter-spacing: .03em; font-weight: 500; }
+.gramophone__close { flex-shrink: 0; width: 44px; height: 44px; text-align: center; font-size: 23px; line-height: 1; }
+.gramophone__playlist-note { margin: 18px 0 22px; color: #8e755c; font-size: 10px; line-height: 1.6; }
+.gramophone__tracks { display: grid; gap: 10px; padding: 0; margin: 0; list-style: none; }
+.gramophone__track { --gr: 14px; --ga: .26; width: 100%; display: grid; grid-template-columns: 20px minmax(0,1fr) 32px; gap: 10px; align-items: center; min-height: 48px; padding: 12px; font-size: 11px; text-align: left; }
+.gramophone__track > span { color: #a08a71; font-size: 9px; }
+.gramophone__track b { font-size: 12px; font-weight: 400; }
+.gramophone__track small { color: #a08a71; font-size: 9px; text-align: right; }
+.gramophone__track[aria-current="true"] { --gtint: 242, 177, 111; --ga: .43; color: #81451f; }
+.gramophone__playlist-foot { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; margin-top: 22px; }
+.gramophone__playlist-foot button { padding: 12px 10px; min-height: 44px; text-align: center; font-size: 9px; white-space: nowrap; }
+.gramophone__playing-text { font-size: 9px; color: #947c65; }
+.gramophone__error { padding: 12px 0 0; font-size: 11px; line-height: 1.8; color: #a04728; }
+@keyframes gramophone-spin { to { transform: rotate(360deg); } }
+@keyframes gramophone-sway { 0%,100% { transform: rotate(-.7deg); } 50% { transform: rotate(.7deg); } }
+@media (hover: hover) {
+  .gramophone__play:hover { --ty: -3px; box-shadow: inset 0 1px 0 #fff6eae6, 0 9px 24px #a45b293b; }
+  .gramophone__track:hover { transform: translateY(-2px); }
+}
+@media (max-width: 760px) {
+  .gramophone { left: max(5px, env(safe-area-inset-left)); width: 76px; }
+  .gramophone__instrument { width: 76px; height: 80px; }
+  .gramophone__play { width: 54px; min-height: 54px; padding: 14px; margin-top: 8px; --gr: 50%; }
+  .gramophone__track-name { display: none; }
+  .gramophone__list-toggle { min-height: 44px; margin-top: 4px; }
+  .gramophone__list-hint { margin: 0; font-size: 8px; letter-spacing: 0; line-height: 1.6; }
+  .gramophone__playlist { left: max(94px, calc(env(safe-area-inset-left) + 89px)); width: calc(100vw - max(94px, calc(env(safe-area-inset-left) + 89px)) - max(12px, env(safe-area-inset-right))); padding: 18px 14px; --gr: 20px; }
+  .gramophone__playlist-head h2 { font-size: 14px; }
+  .gramophone__playlist-head p { font-size: 7px; letter-spacing: .08em; }
+  .gramophone__playlist-head { gap: 8px; }
+  .gramophone__close { width: 44px; height: 44px; }
+  .gramophone__playlist-note { font-size: 9px; margin: 14px 0 18px; }
+  .gramophone__track { grid-template-columns: 16px minmax(0,1fr) 28px; gap: 6px; padding: 11px 9px; }
+  .gramophone__track b { font-size: 11px; }
+  .gramophone__playlist-foot { gap: 5px; grid-template-columns: 1fr 1fr; }
+  .gramophone__playing-text { grid-column: 1 / -1; grid-row: 1; text-align: center; }
+}
+@media (max-height: 520px) {
+  .gramophone__playlist { top: 16px; transform: none; max-height: calc(100dvh - 32px); }
+  .gramophone__instrument { width: 68px; height: 72px; }
+  .gramophone__track-name { display: none; }
+  .gramophone__list-toggle { margin-top: 2px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gramophone__record, .gramophone__horn { animation: none; }
+  .gramophone__track, .gramophone__play { transition: none; }
+}

@@ -1,748 +1,926 @@
 /* =========================================================
-   《我们》· 交互脚本
-   内容在 data.js，这里一般不需要改。
+   《我们》· 翻页版
+   - 一页一屏：.deck 负责原生滚动吸附，键盘 / 章节导航 / 触控都能翻
+   - 视差：每页的 [data-par] / [data-parx] 按到视口中心的距离位移
+   - 内容全部来自 data.js，这里只负责排版与交互
    ========================================================= */
 (() => {
   'use strict';
-  const S = window.SITE;
-  const $ = (s, el = document) => el.querySelector(s);
-  const $$ = (s, el = document) => [...el.querySelectorAll(s)];
-  const isTouch = matchMedia('(hover: none)').matches;
-  const isMobile = () => innerWidth <= 820;
-  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const DAY = 86400000;
 
-  /* ---------- 工具 ---------- */
-  const esc = (s = '') => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const parseDate = s => { if (!s) return null; const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
-  const fmtDate = s => s ? s.replace(/-/g, '.') : '— · —';
+  const S = window.SITE || {};
+  const initialHash = location.hash;
+  const $ = (s, el = document) => el.querySelector(s);
+  const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
+  const DAY = 864e5;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+  const esc = (s = '') => String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+  const parseDate = s => {
+    if (!s) return null;
+    const [y, m, d] = s.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
   const today = () => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); };
   const daysBetween = (a, b) => Math.round((b - a) / DAY);
+  const fmt = s => (s ? s.replace(/-/g, '.') : '—');
+  const pad2 = n => String(n).padStart(2, '0');
 
-  // 根据字符串生成稳定的伪随机数，让每件展品的占位装置都不同但固定
-  const seeded = str => { let h = 2166136261; for (const c of str) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return () => ((h = Math.imul(h ^ (h >>> 15), 2246822507) ^ Math.imul(h ^ (h >>> 13), 3266489909)) >>> 0) / 4294967296; };
-  const artHTML = (key, label = '') => {
-    const r = seeded(key);
-    const p = n => (r() * n).toFixed(1) + '%';
-    const vars = `--ax:${p(100)};--ay:${p(60)};--x1:${p(40)};--y1:${p(30)};--x2:${(30 + r() * 40).toFixed(1)}%;--y2:${(25 + r() * 40).toFixed(1)}%;--x3:${p(80)};--y3:${p(70)};--y4:${(40 + r() * 45).toFixed(1)}%;--r4:${(-20 + r() * 40).toFixed(1)}deg`;
-    return `<div class="art" style="${vars}"><i class="a1"></i><i class="a2"></i><i class="a3"></i><i class="a4"></i>${label ? `<b>${esc(label)}</b>` : ''}</div>`;
+  const places = S.places || [];
+  const end = S.ending || {};
+
+  /* ══════════════ 品牌 / 天数 ══════════════ */
+  $('#brandName').textContent = S.title || '我们';
+  $('#brandSub').textContent = S.subtitle || '';
+
+  const since = parseDate(S.togetherSince);
+  const days = since ? Math.max(0, daysBetween(since, today())) : 0;
+
+  const daysNum = $('#daysNum');
+  const daysMini = $('#daysMini');
+  const dayBtn = $('#dayBtn');
+  daysNum.textContent = String(days);
+  daysMini.textContent = pad2(days);
+  $('#sinceLine').textContent = since ? '自 ' + fmt(S.togetherSince) + ' 起' : '日期待定';
+  dayBtn.title = since ? '自 ' + fmt(S.togetherSince) + ' 起，一起走过 ' + days + ' 天' : '';
+  dayBtn.addEventListener('click', () => go(0));
+
+  let counted = false;
+  let countStop = false;
+  const countUp = () => {
+    if (counted) return;
+    counted = true;
+    if (reduce) return;
+    const t0 = performance.now();
+    // 用 performance.now() 而不是 rAF 的时间戳：慢帧时时间戳会落后于真实时间
+    const tick = () => {
+      if (countStop) return;
+      const k = Math.min(1, Math.max(0, (performance.now() - t0) / 1500));
+      const e = 1 - Math.pow(1 - k, 3);
+      daysNum.textContent = String(Math.round(days * e));
+      if (k < 1) requestAnimationFrame(tick);
+      else daysNum.textContent = String(days);
+    };
+    daysNum.textContent = '0';
+    requestAnimationFrame(tick);
   };
-  const mediaHTML = (src, key, label) => src ? `<img src="${esc(src)}" alt="${esc(label)}" loading="lazy" decoding="async">` : artHTML(key, label);
 
-  /* =========================================================
-     入口 + 音乐
-     ========================================================= */
+  /* ══════════════ 04 · 时间长廊 ══════════════ */
+  // 时间线走 js/time-data.js（从「时间.txt」生成）；没有就退回 data.js 里的 timeline
+  const TIMELINE = window.TIMELINE || S.timeline || [];
+  $('#time').innerHTML = TIMELINE.map((t, i) => `
+    <li>
+      <button class="time__row glass" type="button" data-time="${i}" style="--i:${i}" aria-label="打开：${esc(t.title)}">
+        <span class="time__date">${esc(t.date ? fmt(t.date) : '将来')}</span>
+        <span class="time__body info-block">
+          <b class="time__title">${esc(t.title)}</b>
+          <span class="time__line">${esc(t.line || t.text || '')}</span>
+        </span>
+        <span class="time__go" aria-hidden="true">→</span>
+      </button>
+    </li>`).join('');
+
+  /* ══════════════ 05 · 纪念日 ══════════════ */
+  // 五张卡走 js/dates-data.js；没有就退回 data.js 里的 dates
+  const DATES = window.DATES || S.dates || [];
+  const countdown = d => {
+    const when = parseDate(d.date);
+    if (!when) return { n: '—', unit: '', sub: '日期待定', near: false, isToday: false };
+    const now = today();
+    if (d.mode === 'since') {
+      const n = Math.max(0, daysBetween(when, now));
+      return { n, unit: '天', sub: 'SINCE ' + fmt(d.date), near: false, isToday: false };
+    }
+    let next = new Date(now.getFullYear(), when.getMonth(), when.getDate());
+    if (d.mode === 'annual' && next < now) next = new Date(now.getFullYear() + 1, when.getMonth(), when.getDate());
+    const left = daysBetween(now, next);
+    return {
+      n: left === 0 ? '今天' : Math.abs(left),
+      unit: left === 0 ? '' : '天',
+      sub: d.mode === 'annual'
+        ? 'EVERY ' + pad2(when.getMonth() + 1) + '.' + pad2(when.getDate())
+        : fmt(d.date),
+      near: left > 0 && left <= 7,
+      isToday: left === 0
+    };
+  };
+
+  // 每次重新算一遍：跨过零点、从后台切回来、从 bfcache 恢复，数字都不会停在旧的一天
+  const renderDates = () => {
+    $('#dates').innerHTML = DATES.map((d, i) => {
+      const c = countdown(d);
+      return `<article class="dateCard glass glass--tilt${c.near ? ' is-near' : ''}${c.isToday ? ' is-today' : ''}" style="--i:${i}">
+        <div class="info-block dateCard__content">
+          <p class="dateCard__no">${esc(d.no || '')}</p>
+          <h3 class="dateCard__name">${esc(d.name)}</h3>
+          <p class="dateCard__en">${esc(d.en || '')}</p>
+          <p class="dateCard__num"><b>${esc(c.n)}</b><span>${esc(c.unit)}</span></p>
+          <p class="dateCard__sub">${esc(c.sub)}</p>
+        </div>
+      </article>`;
+    }).join('');
+  };
+  renderDates();
+
+  // 大厅天数 + 纪念日一起刷新（不重播开场数字动画，直接给最新值）
+  const recount = () => {
+    countStop = true;                       // 万一开场动画还在跑，别让它写回旧值
+    const s = parseDate(S.togetherSince);
+    const d = s ? Math.max(0, daysBetween(s, today())) : 0;
+    daysNum.textContent = String(d);
+    daysMini.textContent = pad2(d);
+    $('#sinceLine').textContent = s ? '自 ' + fmt(S.togetherSince) + ' 起' : '日期待定';
+    dayBtn.title = s ? '自 ' + fmt(S.togetherSince) + ' 起，一起走过 ' + d + ' 天' : '';
+    $('#year').textContent = String(new Date().getFullYear());
+    renderDates();
+  };
+
+  // 正好跨过本机零点时再刷一次；之后每天重排一次
+  const atMidnight = () => {
+    const now = new Date();
+    const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 3);
+    setTimeout(() => { recount(); atMidnight(); }, Math.max(2000, next - now));
+  };
+  atMidnight();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) recount(); });
+  addEventListener('pageshow', e => { if (e.persisted) recount(); });
+  window.__recount = recount;      // 调试口子
+
+  /* ══════════════ 01 · 去过的地方（中国轮廓 + 点） ══════════════ */
+  if (places.length) {
+    const CM = window.CHINA_MAP;
+    const r1 = n => Math.round(n * 10) / 10;
+    const P = CM ? (lng, lat) => CM.project(lng, lat) : (lng, lat) => [lng, lat];
+    const at = places.map(p => ({ p, xy: P(p.lng, p.lat) }));
+
+    // 东边六个挤在一小块，点上一律不压字；名字放右边那一列，指到哪一行就点亮哪个点
+    const dots = at.map(({ p, xy }) => {
+      const [x, y] = xy;
+      return `<g class="pin" data-pin="${esc(p.no || '')}">
+        <circle class="pin__halo" cx="${r1(x)}" cy="${r1(y)}" r="15"></circle>
+        <circle class="pin__dot" cx="${r1(x)}" cy="${r1(y)}" r="4"></circle>
+      </g>`;
+    }).join('');
+
+    $('#map').innerHTML = CM ? `
+      <svg class="mapline__svg" viewBox="0 0 ${CM.w} ${CM.h}" role="presentation">
+        <g class="mapline__glow"><path d="${CM.main}"></path><path d="${CM.taiwan || ''}"></path><path d="${CM.hainan}"></path></g>
+        <path class="mapline__land" d="${CM.main}"></path>
+        <path class="mapline__land" d="${CM.taiwan || ''}"></path>
+        <path class="mapline__land" d="${CM.hainan}"></path>
+        ${dots}
+      </svg>` : '';
+
+    $('#places').innerHTML = places.map(p => `
+      <div class="place" data-pin="${esc(p.no || '')}">
+        <span class="place__meta info-block">
+          <span class="place__no">${esc(p.no || '')}</span>
+          <span class="place__name">${esc(p.name)}<em>${esc(p.en || '')}</em></span>
+        </span>
+      </div>`).join('');
+
+    // 指到哪一行，地图上那个点就亮起来
+    const pins = $$('.pin', $('#map'));
+    $$('.place', $('#places')).forEach(row => {
+      const on = () => pins.forEach(g => g.classList.toggle('is-hot', g.dataset.pin === row.dataset.pin));
+      row.addEventListener('pointerenter', on);
+      row.addEventListener('focusin', on);
+    });
+    $('#places').addEventListener('pointerleave', () => pins.forEach(g => g.classList.remove('is-hot')));
+  }
+
+  /* ══════════════ 06 · 未完 ══════════════ */
+  $('#endLines').innerHTML = (end.lines || []).map(l => `<p>${esc(l)}</p>`).join('');
+  $('#year').textContent = String(new Date().getFullYear());
+
+  /* ══════════════ 02/03 · 两条横向卡片 ══════════════ */
+  const FOOD = window.FOOD || [];
+  const PLAY = window.PLAY || [];
+  const memoryGrid = $('#memoryGrid');
+  const memoryPage = $('#p-memories');
+  const memoryEntries = [];
+  for (let i = 0; i < Math.max(FOOD.length, PLAY.length); i++) {
+    if (FOOD[i]) memoryEntries.push({ kind: 'food', index: i, item: FOOD[i] });
+    if (PLAY[i]) memoryEntries.push({ kind: 'play', index: i, item: PLAY[i] });
+  }
+  memoryGrid.innerHTML = memoryEntries.map(({ kind, index, item }, position) => `
+    <button class="memory-card glass glass--tilt" type="button" data-${kind}="${index}"
+      data-memory-kind="${kind}" data-memory-card aria-label="查看${kind === 'food' ? '吃饭' : '游玩'}回忆：${esc(item.title)}"
+      style="--memory-order:${position}">
+      <span class="memory-card__image"><img src="${esc(item.src)}" alt="${esc(item.title)}" loading="lazy" decoding="async"></span>
+      <span class="memory-card__info info-block">
+        <span class="memory-card__meta"><span>${kind === 'food' ? 'AT THE TABLE' : 'OUT & ABOUT'}</span><span>${pad2(item.n || index + 1)}</span></span>
+        <h3>${esc(item.title)}</h3>
+        <span class="memory-card__excerpt">${esc(item.text)}</span>
+      </span>
+    </button>`).join('');
+
+  const memoryCards = $$('.memory-card', memoryGrid);
+  let memoryLayoutFrame = 0;
+  const layoutMemories = () => {
+    memoryLayoutFrame = 0;
+    const style = getComputedStyle(memoryGrid);
+    const row = parseFloat(style.gridAutoRows) || 8;
+    const gap = parseFloat(style.getPropertyValue('--memory-gap')) || 24;
+    memoryCards.forEach(card => {
+      if (card.hidden) return;
+      const span = Math.ceil((card.offsetHeight + gap) / row);
+      if (card.style.gridRowEnd !== `span ${span}`) card.style.gridRowEnd = `span ${span}`;
+    });
+    if (typeof queueMeasure === 'function') queueMeasure();
+  };
+  const queueMemoryLayout = () => {
+    if (!memoryLayoutFrame) memoryLayoutFrame = requestAnimationFrame(layoutMemories);
+  };
+  memoryGrid.querySelectorAll('img').forEach(img => {
+    img.addEventListener('load', queueMemoryLayout, { once: true });
+    img.addEventListener('error', queueMemoryLayout, { once: true });
+  });
+  if ('ResizeObserver' in window) {
+    const memoryObserver = new ResizeObserver(queueMemoryLayout);
+    memoryCards.forEach(card => memoryObserver.observe(card));
+  }
+  const updateMemoryCount = () => {
+    const visible = memoryCards.reduce((n, card) => n + !card.hidden, 0);
+    $('#memoryCount').textContent = `${visible} 个瞬间`;
+    queueMemoryLayout();
+  };
+  $$('[data-memory-filter]').forEach(button => button.addEventListener('click', () => {
+    const kind = button.dataset.memoryFilter;
+    $$('[data-memory-filter]').forEach(other => other.setAttribute('aria-pressed', String(other === button)));
+    memoryCards.forEach(card => { card.hidden = kind !== 'all' && card.dataset.memoryKind !== kind; });
+    updateMemoryCount();
+    deck.scrollTop = pagesM.find(page => page.el === memoryPage)?.top || 0;
+  }));
+  updateMemoryCount();
+
+  /* ══════════════ 翻页控制器 ══════════════ */
+  const deck = $('#deck');
+  const pages = $$('.page', deck);
+  const pageIndexForHash = hash => pages.findIndex(p => '#' + p.id === hash);
+  const initialTarget = pageIndexForHash(initialHash === '#p-food' || initialHash === '#p-play' ? '#p-memories' : initialHash);
+  if (initialTarget >= 0 && pages[initialTarget].hasAttribute('data-scrollable')) {
+    const filterKind = initialHash === '#p-food' ? 'food' : initialHash === '#p-play' ? 'play' : 'all';
+    const initialFilter = $('[data-memory-filter="' + filterKind + '"]');
+    if (initialFilter) {
+      $$('[data-memory-filter]').forEach(button => button.setAttribute('aria-pressed', String(button === initialFilter)));
+      memoryCards.forEach(card => { card.hidden = filterKind !== 'all' && card.dataset.memoryKind !== filterKind; });
+      $('#memoryCount').textContent = memoryCards.filter(card => !card.hidden).length + ' 个瞬间';
+    }
+  }
+  const rail = $('#rail');
+  const pagerNow = $('#pagerNow');
+  const pagerFill = $('#pagerFill');
+  $('#pagerAll').textContent = pad2(pages.length);
+
+  rail.innerHTML = pages.map((p, i) => `
+    <button class="rail__dot glass" type="button" data-page="${i}" aria-current="${i === 0}" aria-label="${esc(p.dataset.label || '第 ' + (i + 1) + ' 页')}">
+      <span>${pad2(i)}</span><span class="rail__tip">${esc(p.dataset.label || '')}</span>
+    </button>`).join('');
+
+  let pagesM = [];
+  let active = -1;
+  let queued = 0;
+
+  const measure = () => {
+    pagesM = pages.map(el => ({
+      el,
+      inner: $('.page__inner', el),
+      top: el.offsetTop,
+      h: el.offsetHeight,
+      layers: $$('[data-par],[data-parx],[data-pars]', el).map(n => ({
+        n,
+        y: parseFloat(n.dataset.par || 0),
+        x: parseFloat(n.dataset.parx || 0),
+        s: parseFloat(n.dataset.pars || 0)
+      }))
+    }));
+  };
+  const queueMeasure = () => {
+    if (queued) return;
+    queued = requestAnimationFrame(() => { queued = 0; measure(); render(); });
+  };
+
+  const setActive = i => {
+    if (i === active) return;
+    active = i;
+    $$('.rail__dot', rail).forEach((b, k) => b.setAttribute('aria-current', k === i ? 'true' : 'false'));
+    pagerNow.textContent = pad2(i);
+    try { history.replaceState(null, '', '#' + pages[i].id); } catch (e) { /* file:// 下忽略 */ }
+    if (i === 0) countUp();
+  };
+
+  const render = () => {
+    const vh = deck.clientHeight || 1;
+    const st = deck.scrollTop;
+    const max = Math.max(1, deck.scrollHeight - vh);
+
+    pagerFill.style.width = (clamp(st / max, 0, 1) * 100).toFixed(2) + '%';
+    window.__DECK = { progress: clamp(st / max, 0, 1), dir: deckDir };
+
+    let best = 0;
+    for (let i = 0; i < pagesM.length; i++) {
+      if (st + vh * 0.4 >= pagesM[i].top) best = i;
+    }
+
+    // 视差层（装饰：页码幽灵、胶片墙）
+    if (!reduce) {
+      for (let i = 0; i < pagesM.length; i++) {
+        const p = pagesM[i];
+        const d = clamp((p.top + p.h / 2 - st - vh / 2) / Math.max(p.h, vh), -1.15, 1.15);
+        p.d = d;
+        for (let j = 0; j < p.layers.length; j++) {
+          const l = p.layers[j];
+          let t = `translate3d(${(d * l.x * p.h).toFixed(1)}px,${(d * l.y * p.h).toFixed(1)}px,0)`;
+          if (l.s) t += ` scale(${(1 + d * l.s).toFixed(4)})`;
+          l.n.style.transform = t;
+        }
+      }
+    }
+
+    setActive(best);
+  };
+
+  // Smooth page movement uses the same easing for wheel, keyboard, and navigation controls.
+  const easeInOut = k => k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+
+  let glideId = 0;
+  let gliding = false;
+  let deckDir = 0;        // 最近一次翻页方向：1 向下，-1 向上
+
+  // Page changes keep the scroll-to-section motion and landing alignment without particle transitions.
+  const pageTurn = i => {
+    const to = pagesM[i];
+    if (!to) return;
+    const distance = Math.abs(to.top - deck.scrollTop);
+    glideTo(to.top, reduce ? 240 : clamp(360 + distance * .1, 380, 620));
+  };
+
+  // Ease the scroll to a section boundary after a page change.
+  const glideTo = (to, dur) => {
+    const from = deck.scrollTop;
+    if (Math.abs(to - from) < 2) return;
+    deckDir = to > from ? 1 : -1;
+    const frames = Math.max(8, Math.round(dur / (1000 / 60)));
+    const stepPx = Math.max(6, Math.abs(to - from) / frames);   // 每帧至少这么多，避免被节流吞掉
+    let f = 0;
+    let pos = from;
+    const id = ++glideId;
+    gliding = true;
+    const step = () => {
+      if (id !== glideId) { gliding = false; return; }
+      f++;
+      const k = Math.min(1, f / frames);
+      pos += Math.sign(to - from) * Math.max(stepPx, Math.abs(to - from) * easeInOut(k) - Math.abs(pos - from));
+      deck.scrollTop = k >= 1 ? to : pos;
+      render();
+      if (k < 1) requestAnimationFrame(step);
+      else {
+        gliding = false;
+      }
+    };
+    requestAnimationFrame(step);
+  };
+
+  // 手指一碰就把控制权交回去
+  addEventListener('touchstart', () => {
+    glideId = 0; gliding = false;
+  }, { passive: true });
+
+  const go = (i, smooth = true) => {
+    const p = pagesM[i];
+    if (!p) return;
+    if (!smooth) {
+      glideId = 0; gliding = false;
+      deck.scrollTop = p.top;
+      return;
+    }
+    const cur = active;
+    if (i === cur) return;
+    const dist = Math.abs(p.top - deck.scrollTop);
+    // Larger jumps use a slightly longer scroll while keeping the same landing point.
+    if (Math.abs(i - cur) !== 1 || dist > deck.clientHeight * 1.6) {
+      glideTo(p.top, reduce ? 320 : clamp(420 + dist * .1, 460, 700));
+    } else {
+      pageTurn(i);
+    }
+  };
+  // 翻页途中以「正在去的那一页」为准，别从旧页再算一次
+  const step = dir => go(clamp((active < 0 ? 0 : active) + dir, 0, pagesM.length - 1));
+
+  window.__deck = {
+    go, step, measure, render, pages,
+    setSettle(on) { settleEnabled = !!on; },   // 调试用：关掉「松手转完」
+    get index() { return active; },
+    get list() { return pagesM; }
+  };
+
+  /* ══════════════ 横向卡片轨道（吃饭 / 好玩 共用） ══════════════ */
+  // 两遍首尾相接 → 无缝循环；悬停暂停并放大；滚轮拨动；拖动跟手 + 松手惯性；
+  // 点开看大图。两条轨道用同一套逻辑，只有页面、数据、data-* 不一样。
+  const setupStrip = ({ page, track, data, kind, speed = 26 }) => {
+    const COPIES = 2;
+    const SPEED = speed;                   // px/s
+    track.innerHTML = Array.from({ length: COPIES }, () => data.map((f, i) => `
+      <button class="food__card glass glass--tilt" type="button" data-${kind}="${i}" aria-label="打开：${esc(f.title)}">
+        <span class="food__pix"><img src="${esc(f.src)}" alt="${esc(f.title)}" loading="${i < 6 ? 'eager' : 'lazy'}" decoding="async"></span>
+        <span class="food__body">
+          <span class="food__name">${esc(f.title)}</span>
+          <span class="food__text">${esc(f.text)}</span>
+        </span>
+      </button>`).join('')).join('');
+
+    const firstCard = track.querySelector('.food__card');
+    const gapOf = () => parseFloat(getComputedStyle(track).columnGap || '12') || 12;
+    const cardW = () => (firstCard ? firstCard.offsetWidth + gapOf() : 260);
+    const loopW = () => cardW() * data.length;          // 一遍的长度
+    const atRest = () => {
+      const p = pagesM.find(x => x.el === page);
+      return !!p && Math.abs(p.top - deck.scrollTop) < 3;
+    };
+
+    let off = 0;                 // 循环内偏移
+    let vel = SPEED;             // 当前速度 px/s（正 = 往左，跟自动播放同向）
+    let lastT = performance.now();
+    let paused = false;          // 指到某张卡上
+    let drag = null;
+    let suppressUntil = 0;       // 拖完那一下不要顺手点开
+    let lastSample = 0;
+    const EASE_TAU = .42;        // 松手后速度回到自动速度的时间常数（秒）
+
+    const repaint = () => {
+      if (gliding) return;
+    };
+
+    const tick = now => {
+      requestAnimationFrame(tick);
+      const dt = Math.min(.06, Math.max(0, (now - lastT) / 1000));
+      lastT = now;
+      // 甩出去还在减速时不理会悬停，等它落回自动速度再算「指住就停」
+      const coasting = Math.abs(vel - SPEED) > 1;
+      if ((paused && !coasting) || drag || !atRest()) return;
+      const vw = document.querySelector('.viewer');
+      if (vw && !vw.hidden) return;
+      const L = loopW();
+      if (L < 4) return;
+      // 甩出来的速度指数收敛回自动播放速度：先冲一段，再慢慢减回去
+      vel += (SPEED - vel) * (1 - Math.exp(-dt / EASE_TAU));
+      if (Math.abs(vel - SPEED) < .1) vel = SPEED;
+      off += vel * dt;
+      if (off >= L) off -= L;
+      if (off < 0) off += L;
+      track.scrollLeft = off;
+      if (Math.abs(off - lastSample) > cardW()) { lastSample = off; repaint(); }
+    };
+    requestAnimationFrame(tick);
+
+    // 拖：按住横向拖，速度跟手一致；松手带着惯性慢慢回到自动速度
+    track.addEventListener('pointerdown', e => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      drag = { x: e.clientX, left: track.scrollLeft, moved: false, samples: [{ x: e.clientX, t: performance.now() }] };
+      track.classList.add('is-drag');
+    });
+    track.addEventListener('pointermove', e => {
+      if (!drag) {
+        if (e.pointerType !== 'mouse') return;
+        // 指到哪张就暂停哪张（放大交给 CSS）；正在惯性滑行时先让它滑完
+        paused = !!e.target.closest('.food__card');
+        return;
+      }
+      const dx = e.clientX - drag.x;
+      if (!drag.moved && Math.abs(dx) > 4) drag.moved = true;
+      if (drag.moved) {
+        track.scrollLeft = drag.left - dx;          // 1:1 跟手
+        off = track.scrollLeft;
+        // 留几个采样点算甩出去的速度
+        const now = performance.now();
+        drag.samples.push({ x: e.clientX, t: now });
+        while (drag.samples.length > 2 && now - drag.samples[0].t > 120) drag.samples.shift();
+      }
+    });
+    const endDrag = () => {
+      if (!drag) return;
+      const moved = drag.moved;
+      const s = drag.samples;
+      drag = null;
+      track.classList.remove('is-drag');
+      if (moved) {
+        suppressUntil = performance.now() + 350;
+        off = track.scrollLeft;
+        // 最后一段的位移速度 = 甩出去的速度（往左拖 = 正速度）
+        const a = s[0], b = s[s.length - 1];
+        const dtms = b.t - a.t;
+        let v = dtms > 8 ? -((b.x - a.x) / dtms) * 1000 : SPEED;
+        if (!isFinite(v)) v = SPEED;
+        vel = Math.max(-2600, Math.min(2600, v));
+        // 没甩起来（比自动速度还慢）就按原速走，不要从 0 慢慢加速
+        if (Math.abs(vel) < SPEED) vel = (vel < 0 ? -1 : 1) * SPEED;
+        repaint();
+      }
+    };
+    track.addEventListener('pointerup', endDrag);
+    track.addEventListener('pointercancel', endDrag);
+    track.addEventListener('pointerleave', () => {
+      if (drag) endDrag();
+      paused = false;
+    });
+
+    // 滚轮：鼠标在轨道上时，滚轮改拨这条轨道（前滚 / 后滚），不翻页
+    track.addEventListener('wheel', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      const d = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+      if (!d) return;
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? track.clientWidth : 1;
+      off += d * unit * 1.5;
+      off = ((off % loopW()) + loopW()) % loopW();
+      vel = SPEED;
+      track.scrollLeft = off;
+      if (Math.abs(off - lastSample) > cardW()) { lastSample = off; repaint(); }
+    }, { passive: false });
+
+    // 拖完的 click 要吞掉，不然会突然弹出详情层（只吞 350ms 内那一下）
+    track.addEventListener('click', e => {
+      if (performance.now() > suppressUntil) return;
+      e.stopPropagation();
+      e.preventDefault();
+    }, true);
+
+    return {
+      get off() { return off; },
+      get vel() { return vel; },
+      get dragging() { return !!drag; },
+      get paused() { return paused; },
+      set off(v) { off = Math.max(0, Math.min(loopW() - .01, +v || 0)); track.scrollLeft = off; },
+      get loop() { return loopW(); },
+      pause(v) { paused = !!v; }
+    };
+  };
+
+  window.__strips = {};
+  window.__food = null;
+
+  // Only the cover-to-places boundary keeps a settling point.
+  let settleTimer = 0;
+  let settleEnabled = true;
+  let autoMoving = false;
+  let autoPauseUntil = 0;
+  let autoDirection = 1;
+  let autoScrollEventUntil = 0;
+  const settle = () => {
+    if (gliding) return;
+    if (!settleEnabled || autoMoving) return;
+    const st = deck.scrollTop;
+    const first = pagesM[0];
+    const second = pagesM[1];
+    if (!first || !second || st < first.top || st >= second.top) return;
+    const toFirst = st - first.top;
+    const toSecond = second.top - st;
+    const distance = Math.min(toFirst, toSecond);
+    if (distance < 10) return;
+    glideTo(toFirst < toSecond ? first.top : second.top, reduce ? 180 : clamp(260 + distance * .12, 300, 460));
+  };
+
+  deck.addEventListener('scroll', () => {
+    if (autoMoving || performance.now() < autoScrollEventUntil) return;
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(settle, 240);
+    autoPauseUntil = performance.now() + 2400;
+    if (queued) return;
+    queued = requestAnimationFrame(() => { queued = 0; render(); });
+  }, { passive: true });
+
+  let autoLastTime = performance.now();
+  const autoScroll = now => {
+    const dt = Math.min(.05, Math.max(0, (now - autoLastTime) / 1000));
+    autoLastTime = now;
+    const memoryIndex = pages.indexOf(memoryPage);
+    const page = pagesM[memoryIndex];
+    if (page && active === memoryIndex && viewer.hidden && now >= autoPauseUntil && !gliding) {
+      const min = page.top;
+      const max = page.top + Math.max(0, page.h - deck.clientHeight);
+      if (max - min > 2) {
+        if (autoDirection > 0 && deck.scrollTop >= max - 2) autoDirection = -1;
+        else if (autoDirection < 0 && deck.scrollTop <= min + 2) autoDirection = 1;
+        const next = clamp(deck.scrollTop + autoDirection * 24 * dt, min, max);
+        if (Math.abs(next - deck.scrollTop) > .01) {
+          autoMoving = true;
+          autoScrollEventUntil = now + 80;
+          deck.scrollTop = next;
+          autoMoving = false;
+          render();
+        }
+      }
+    }
+    requestAnimationFrame(autoScroll);
+  };
+  requestAnimationFrame(autoScroll);
+  const pauseAutoScroll = () => { autoPauseUntil = performance.now() + 2600; };
+  memoryGrid.addEventListener('pointerenter', () => { autoPauseUntil = Infinity; });
+  memoryGrid.addEventListener('pointerleave', pauseAutoScroll);
+  deck.addEventListener('pointerdown', pauseAutoScroll, { passive: true });
+  deck.addEventListener('touchstart', pauseAutoScroll, { passive: true });
+  deck.addEventListener('wheel', pauseAutoScroll, { passive: true });
+
+  rail.addEventListener('click', e => {
+    const b = e.target.closest('[data-page]');
+    if (b) go(+b.dataset.page);
+  });
+  $('.hud__brand').addEventListener('click', e => { e.preventDefault(); go(0); });
+  $('#topBtn').addEventListener('click', () => go(0));
+  $('#endBtn').addEventListener('click', () => { paintEnd(); openViewer(); });
+
+  addEventListener('keydown', e => {
+    if (!viewer.hidden) return;                 // 详情层自己处理按键
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    if (e.target.closest && e.target.closest('button, a, input, textarea, select, [contenteditable]')) return;
+    if (pages[active]?.hasAttribute('data-scrollable')) pauseAutoScroll();
+    const secondTop = pagesM[1]?.top || 0;
+    const scrollAmount = e.key === 'PageDown' || e.key === 'PageUp' || e.key === ' ' || e.key === 'Spacebar'
+      ? deck.clientHeight * .86 : 110;
+    switch (e.key) {
+      case 'ArrowDown': case 'PageDown': case ' ': case 'Spacebar':
+        if (active === 0) go(1);
+        else { e.preventDefault(); deck.scrollBy({ top: scrollAmount, behavior: 'smooth' }); }
+        break;
+      case 'ArrowUp': case 'PageUp':
+        if (active === 1 && deck.scrollTop <= secondTop + 3) go(0);
+        else { e.preventDefault(); deck.scrollBy({ top: -scrollAmount, behavior: 'smooth' }); }
+        break;
+      case 'ArrowRight': e.preventDefault(); step(1); break;
+      case 'ArrowLeft': e.preventDefault(); step(-1); break;
+      case 'Home': e.preventDefault(); go(0); break;
+      case 'End': e.preventDefault(); deck.scrollTo({ top: deck.scrollHeight, behavior: 'smooth' }); break;
+    }
+  });
+
+  addEventListener('resize', () => { measure(); render(); }, { passive: true });
+
+  if ('ResizeObserver' in window) {
+    const ro = new ResizeObserver(() => queueMeasure());
+    pages.forEach(p => ro.observe(p));
+  }
+
+  measure();
+  render();
+
+  // 深链：#p-food 之类
+  const fromHash = (hash = location.hash) => {
+    if (!hash) return;
+    const alias = hash === '#p-food' || hash === '#p-play';
+    const i = pages.findIndex(p => '#' + p.id === (alias ? '#p-memories' : hash));
+    if (i > 0) {
+      if (alias) {
+        const filter = $('[data-memory-filter="' + (hash === '#p-food' ? 'food' : 'play') + '"]');
+        if (filter) filter.click();
+      }
+      measure();
+      deck.scrollTo({ top: pagesM[i].top, behavior: 'auto' });
+      render();
+    }
+  };
+  requestAnimationFrame(() => fromHash(initialHash));
+  addEventListener('hashchange', () => fromHash());
+  setTimeout(countUp, 420);
+  // 兜底：后台标签页 / 慢设备上 rAF 可能停在半路
+  setTimeout(() => { countStop = true; recount(); }, 2600);
+
+  /* ══════════════ 详情层 ══════════════ */
+  const viewer = document.createElement('div');
+  viewer.className = 'viewer';
+  viewer.hidden = true;
+  viewer.innerHTML = `
+    <article class="viewer__panel glass" role="dialog" aria-modal="true" aria-labelledby="viewerTitle" tabindex="-1">
+      <button class="viewer__close glass" type="button" aria-label="关闭">×</button>
+      <p class="viewer__kicker" id="viewerKicker"></p>
+      <h3 class="viewer__title" id="viewerTitle"></h3>
+      <div class="viewer__imgs" id="viewerImgs"></div>
+      <div class="viewer__text" id="viewerText"></div>
+      <div class="viewer__foot">
+        <span class="viewer__count" id="viewerCount"></span>
+        <span class="viewer__nav">
+          <button class="viewer__btn glass" type="button" data-nav="-1">← 上一件</button>
+          <button class="viewer__btn glass" type="button" data-nav="1">下一件 →</button>
+        </span>
+      </div>
+    </article>`;
+  document.body.appendChild(viewer);
+
+  const panel = $('.viewer__panel', viewer);
+  const vKicker = $('#viewerKicker', viewer);
+  const vTitle = $('#viewerTitle', viewer);
+  const vImgs = $('#viewerImgs', viewer);
+  const vText = $('#viewerText', viewer);
+  const vCount = $('#viewerCount', viewer);
+  const vPrev = $('[data-nav="-1"]', viewer);
+  const vNext = $('[data-nav="1"]', viewer);
+
+  let vState = { kind: 'story', index: 0 };
+  let lastFocus = null;
+  let hideTimer = 0;
+
+  const paint = ({ kicker, title, images, text, count, kind, index, prev, next }) => {
+    vState = { kind, index };
+    panel.dataset.kind = kind || '';
+    vKicker.textContent = kicker || '';
+    vTitle.textContent = title || '';
+    vImgs.innerHTML = (images || []).filter(Boolean).map(src => `<img src="${esc(src)}" alt="">`).join('');
+    vImgs.style.display = (images || []).filter(Boolean).length ? 'grid' : 'none';
+    vText.innerHTML = (text || []).filter(Boolean).map(t => `<p>${esc(t)}</p>`).join('');
+    vCount.textContent = count || '';
+    vPrev.disabled = !prev;
+    vNext.disabled = !next;
+    panel.scrollTop = 0;
+  };
+
+  const paintEnd = () => {
+    const u = end.unfinished || {};
+    paint({
+      kicker: u.en || 'WORK IN PROGRESS',
+      title: u.title || '未完成的展品',
+      images: [],
+      text: end.lines || [],
+      count: u.no || '∞',
+      kind: 'end',
+      index: 0,
+      prev: false,
+      next: false
+    });
+  };
+
+  const paintFood = i => {
+    const f = FOOD[i];
+    if (!f) return paintEnd();
+    paint({
+      kicker: 'TABLE · ' + pad2(f.n),
+      title: f.title,
+      images: [f.src],
+      text: [f.text],
+      count: pad2(i + 1) + ' / ' + pad2(FOOD.length),
+      kind: 'food',
+      index: i,
+      prev: i > 0,
+      next: i < FOOD.length - 1
+    });
+  };
+
+  const paintPlay = i => {
+    const f = PLAY[i];
+    if (!f) return paintEnd();
+    paint({
+      kicker: 'MOMENT · ' + pad2(f.n),
+      title: f.title,
+      images: [f.src],
+      text: [f.text],
+      count: pad2(i + 1) + ' / ' + pad2(PLAY.length),
+      kind: 'play',
+      index: i,
+      prev: i > 0,
+      next: i < PLAY.length - 1
+    });
+  };
+
+  // 时间长廊：一条日期 + 标题，点开看那天的完整一段
+  const paintTime = i => {
+    const t = TIMELINE[i];
+    if (!t) return paintEnd();
+    paint({
+      kicker: t.date ? fmt(t.date) : (t.chapter || ''),
+      title: t.title,
+      images: [],
+      text: [t.text || t.line || ''],
+      count: pad2(i + 1) + ' / ' + pad2(TIMELINE.length),
+      kind: 'time',
+      index: i,
+      prev: i > 0,
+      next: i < TIMELINE.length - 1
+    });
+  };
+
+  const openViewer = () => {
+    clearTimeout(hideTimer);
+    lastFocus = document.activeElement;
+    viewer.hidden = false;
+    requestAnimationFrame(() => viewer.classList.add('is-open'));
+    panel.focus({ preventScroll: true });
+  };
+
+  const closeViewer = () => {
+    if (viewer.hidden) return;
+    viewer.classList.remove('is-open');
+    hideTimer = setTimeout(() => { viewer.hidden = true; }, reduce ? 0 : 280);
+    if (lastFocus && lastFocus.focus) lastFocus.focus({ preventScroll: true });
+  };
+
+  const openFood = i => { paintFood(i); openViewer(); };
+  const openPlay = i => { paintPlay(i); openViewer(); };
+  const openTime = i => { paintTime(i); openViewer(); };
+
+  viewer.addEventListener('click', e => {
+    if (e.target === viewer || e.target.closest('.viewer__close')) { closeViewer(); return; }
+    const nav = e.target.closest('[data-nav]');
+    if (nav) {
+      const dir = +nav.dataset.nav;
+      if (vState.kind === 'food') paintFood(clamp(vState.index + dir, 0, FOOD.length - 1));
+      else if (vState.kind === 'play') paintPlay(clamp(vState.index + dir, 0, PLAY.length - 1));
+      else if (vState.kind === 'time') paintTime(clamp(vState.index + dir, 0, TIMELINE.length - 1));
+    }
+  });
+
+  deck.addEventListener('click', e => {
+    const el = e.target.closest('[data-food],[data-play],[data-time]');
+    if (!el) return;
+    if (el.dataset.food !== undefined) openFood(+el.dataset.food);
+    else if (el.dataset.play !== undefined) openPlay(+el.dataset.play);
+    else openTime(+el.dataset.time);
+  });
+
+  addEventListener('keydown', e => {
+    if (viewer.hidden) return;
+    if (e.key === 'Escape') { closeViewer(); return; }
+    if (e.key === 'ArrowRight') { vNext.click(); return; }
+    if (e.key === 'ArrowLeft') { vPrev.click(); return; }
+    if (e.key === 'Tab') {                       // 简易焦点循环
+      const f = $$('button:not([disabled])', panel);
+      if (!f.length) return;
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
+
+  /* ══════════════ 音乐 ══════════════ */
   const bgm = $('#bgm');
   const musicBtn = $('#musicBtn');
-  let ambient = null;      // 没有 mp3 时的柔和环境音
+  const musicName = $('#musicName');
+  if (!bgm || !musicBtn || !musicName) return; // 播放器由独立的留声机组件接管
+  const M = S.music || {};
+  musicName.textContent = M.title || '音乐';
+
+  let ambient = null;
   let playing = false;
 
-  $('#musicName').textContent = S.music?.title || '';
+  const setPlaying = on => {
+    playing = on;
+    musicBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    musicBtn.setAttribute('aria-label', on ? '暂停音乐' : '播放音乐');
+    musicBtn.classList.toggle('is-on', on);
+  };
 
-  function startAmbient() {
+  const startAmbient = () => {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return null;
     const ctx = new AC();
-    const master = ctx.createGain(); master.gain.value = 0;
-    const filter = ctx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 900;
-    filter.connect(master); master.connect(ctx.destination);
-    [130.81, 196.0, 246.94, 329.63].forEach((f, i) => {   // C3 G3 B3 E4 柔和和弦
-      const o = ctx.createOscillator(); o.type = i % 2 ? 'sine' : 'triangle'; o.frequency.value = f;
-      const g = ctx.createGain(); g.gain.value = .05;
-      const lfo = ctx.createOscillator(); lfo.frequency.value = .05 + i * .03;
-      const lg = ctx.createGain(); lg.gain.value = .03;
-      lfo.connect(lg); lg.connect(g.gain);
-      o.connect(g); g.connect(filter); o.start(); lfo.start();
+    const master = ctx.createGain();
+    master.gain.value = 0;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 900;
+    filter.connect(master);
+    master.connect(ctx.destination);
+    [130.81, 196.0, 246.94, 329.63].forEach((f, i) => {
+      const o = ctx.createOscillator();
+      o.type = i % 2 ? 'sine' : 'triangle';
+      o.frequency.value = f;
+      const g = ctx.createGain();
+      g.gain.value = .05;
+      o.connect(g);
+      g.connect(filter);
+      o.start();
     });
-    master.gain.linearRampToValueAtTime(.5, ctx.currentTime + 3);
+    master.gain.linearRampToValueAtTime(.32, ctx.currentTime + 2);
     return { ctx, master };
-  }
+  };
 
-  function setPlaying(on) {
-    playing = on;
-    musicBtn.classList.toggle('is-paused', !on);
-    musicBtn.setAttribute('aria-label', on ? '暂停音乐' : '继续播放音乐');
-  }
-
-  async function playMusic() {
-    if (S.music?.src) {
-      bgm.src = S.music.src;
+  const play = async () => {
+    if (M.src) {
+      if (!bgm.getAttribute('src')) bgm.src = M.src;
       bgm.volume = 0;
       try {
         await bgm.play();
-        let v = 0; const t = setInterval(() => { v = Math.min(.7, v + .05); bgm.volume = v; if (v >= .7) clearInterval(t); }, 120);
-        setPlaying(true); return;
-      } catch (e) { /* 文件不存在或被拦截，改用环境音 */ }
+        let v = 0;
+        const t = setInterval(() => {
+          v = Math.min(.7, v + .05);
+          bgm.volume = v;
+          if (v >= .7) clearInterval(t);
+        }, 120);
+        setPlaying(true);
+        return;
+      } catch (err) { /* 没有音频文件时退回环境音 */ }
     }
-    ambient = startAmbient();
+    ambient = ambient || startAmbient();
+    if (ambient && ambient.ctx.state === 'suspended') await ambient.ctx.resume();
+    if (ambient) ambient.master.gain.linearRampToValueAtTime(.32, ambient.ctx.currentTime + .4);
     setPlaying(!!ambient);
-  }
+  };
 
-  musicBtn.addEventListener('click', () => {
-    if (ambient) {
-      playing ? ambient.ctx.suspend() : ambient.ctx.resume();
-      setPlaying(!playing);
-    } else if (bgm.src) {
-      playing ? bgm.pause() : bgm.play();
-      setPlaying(!playing);
-    } else playMusic();
-  });
+  const pause = () => {
+    if (bgm.getAttribute('src') && !bgm.paused) bgm.pause();
+    if (ambient) ambient.master.gain.linearRampToValueAtTime(0, ambient.ctx.currentTime + .3);
+    setPlaying(false);
+  };
 
-  $('#enterBtn').addEventListener('click', () => {
-    playMusic();
-    const intro = $('#intro');
-    intro.classList.add('is-leaving');
-    document.body.classList.remove('is-locked');
-    setTimeout(() => {
-      document.body.classList.add('is-entered');
-      intro.remove();
-      countUpDays();
-    }, 650);
-  });
-
-  /* =========================================================
-     背景粒子 + 光标光晕
-     ========================================================= */
-  const cv = $('#particles');
-  const cx = cv.getContext('2d');
-  let parts = [], dpr = 1, raf = 0;
-  function sizeCanvas() {
-    dpr = Math.min(devicePixelRatio || 1, 2);
-    cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
-    const n = reduceMotion ? 0 : Math.round(Math.min(90, innerWidth * innerHeight / (isMobile() ? 26000 : 18000)));
-    parts = Array.from({ length: n }, () => ({
-      x: Math.random() * cv.width, y: Math.random() * cv.height,
-      r: (Math.random() * 1.3 + .3) * dpr, s: (Math.random() * .25 + .05) * dpr,
-      a: Math.random() * .5 + .15, t: Math.random() * Math.PI * 2
-    }));
-  }
-  let pLast = 0;
-  function drawParticles(t = performance.now()) {
-    // 按时间推进，高刷屏上粒子速度不变
-    const f = pLast ? Math.min(3, (t - pLast) / 16.67) : 1; pLast = t;
-    cx.clearRect(0, 0, cv.width, cv.height);
-    for (const p of parts) {
-      p.y -= p.s * f; p.t += .015 * f; p.x += Math.sin(p.t) * .15 * dpr * f;
-      if (p.y < -10) { p.y = cv.height + 10; p.x = Math.random() * cv.width; }
-      cx.globalAlpha = p.a * (.6 + Math.sin(p.t * 1.3) * .4);
-      cx.fillStyle = '#ead6ae';
-      cx.beginPath(); cx.arc(p.x, p.y, p.r, 0, 6.283); cx.fill();
-    }
-    raf = requestAnimationFrame(drawParticles);
-  }
-  sizeCanvas(); if (parts.length) drawParticles();
-  document.addEventListener('visibilitychange', () => { cancelAnimationFrame(raf); pLast = 0; if (!document.hidden && parts.length) drawParticles(); });
-
-  // 光标光晕：鼠标停下、光晕追上后停掉循环
-  if (!isTouch) {
-    const glow = $('.cursor-glow');
-    let gx = innerWidth / 2, gy = innerHeight / 2, tx = gx, ty = gy, fRaf = 0;
-    const follow = () => {
-      gx += (tx - gx) * .12; gy += (ty - gy) * .12;
-      glow.style.transform = `translate3d(${gx.toFixed(1)}px,${gy.toFixed(1)}px,0)`;
-      fRaf = Math.abs(tx - gx) + Math.abs(ty - gy) > .5 ? requestAnimationFrame(follow) : 0;
-    };
-    addEventListener('pointermove', e => {
-      tx = e.clientX; ty = e.clientY;
-      if (!document.body.classList.contains('has-pointer')) document.body.classList.add('has-pointer');
-      if (!fRaf) fRaf = requestAnimationFrame(follow);
-    }, { passive: true });
-  }
-
-  /* =========================================================
-     导航 + 空间化滚动
-     ========================================================= */
-  const plates = $('#navPlates');
-  const menuBtn = $('#menuBtn');
-  const closeMenu = () => { plates.classList.remove('is-open'); menuBtn.setAttribute('aria-expanded', 'false'); };
-  menuBtn.addEventListener('click', () => {
-    const open = !plates.classList.contains('is-open');
-    plates.classList.toggle('is-open', open);
-    menuBtn.setAttribute('aria-expanded', String(open));
-  });
-  plates.addEventListener('click', e => { if (e.target.closest('a')) closeMenu(); });
-
-  const navIO = new IntersectionObserver(entries => {
-    entries.forEach(en => {
-      if (!en.isIntersecting) return;
-      const id = en.target.dataset.sec === 'ending' ? 'map' : en.target.dataset.sec;
-      $$('a', plates).forEach(a => a.classList.toggle('is-active', a.dataset.sec === id));
-    });
-  }, { rootMargin: '-45% 0px -50% 0px' });
-  $$('.sec').forEach(s => navIO.observe(s));
-
-  const revealIO = new IntersectionObserver(entries => {
-    entries.forEach(en => { if (en.isIntersecting) { en.target.classList.add('is-in'); revealIO.unobserve(en.target); } });
-  }, { threshold: .12, rootMargin: '0px 0px -6% 0px' });
-  const observeReveal = root => $$('.reveal', root).forEach(el => revealIO.observe(el));
-
-  /* =========================================================
-     大厅：一起走过的天数
-     ========================================================= */
-  function countUpDays() {
-    const start = parseDate(S.togetherSince);
-    if (!start) return;
-    const target = Math.max(0, daysBetween(start, today()) + 1);
-    const el = $('#daysTogether');
-    const t0 = performance.now(), dur = 1400;
-    (function step(t) {
-      const k = Math.max(0, Math.min(1, (t - t0) / dur));
-      el.textContent = Math.round(target * (1 - Math.pow(1 - k, 3))).toLocaleString('zh-CN');
-      if (k < 1) requestAnimationFrame(step);
-    })(t0);
-  }
-
-  /* =========================================================
-     故事展品区
-     ========================================================= */
-  const themeName = id => S.themes.find(t => t.id === id) || { en: '', cn: '' };
-  const stories = [...S.stories].sort((a, b) => {
-    const ti = S.themes.findIndex(t => t.id === a.theme) - S.themes.findIndex(t => t.id === b.theme);
-    return ti || (a.date || '9').localeCompare(b.date || '9');
-  });
-
-  const tabs = $('#themeTabs');
-  tabs.innerHTML = [{ id: 'all', en: 'ALL', cn: '全部展品' }, ...S.themes]
-    .map((t, i) => `<button type="button" role="tab" data-theme="${t.id}" class="${i ? '' : 'is-active'}" aria-selected="${!i}"><b>${esc(t.en)}</b><span>${esc(t.cn)}</span></button>`).join('');
-
-  const exhibits = $('#exhibits');
-  exhibits.innerHTML = stories.map((s, i) => {
-    const th = themeName(s.theme);
-    return `<button type="button" class="exhibit glass reveal" data-i="${i}" data-theme="${esc(s.theme)}" style="transition-delay:${(i % 3) * 80}ms">
-      <div class="exhibit__art">${mediaHTML(s.photos?.[0], 'story' + s.no, 'N°' + s.no)}</div>
-      <div class="exhibit__meta"><span class="exhibit__no">N°${esc(s.no)}</span><span class="label">${esc(th.en)}</span></div>
-      <h3 class="exhibit__title">${esc(s.title)}</h3>
-      <p class="exhibit__sum">${esc(s.summary)}</p>
-      <div class="exhibit__foot"><span class="num">${fmtDate(s.date)}</span><span>${esc(s.place)}</span></div>
-    </button>`;
-  }).join('');
-  observeReveal(exhibits);
-
-  tabs.addEventListener('click', e => {
-    const b = e.target.closest('button'); if (!b) return;
-    $$('button', tabs).forEach(x => { x.classList.toggle('is-active', x === b); x.setAttribute('aria-selected', x === b); });
-    const id = b.dataset.theme;
-    $$('.exhibit', exhibits).forEach(card => {
-      const show = id === 'all' || card.dataset.theme === id;
-      card.classList.toggle('is-hidden', !show);
-      if (show) { card.classList.remove('is-in'); requestAnimationFrame(() => requestAnimationFrame(() => card.classList.add('is-in'))); }
-    });
-  });
-
-  // 鼠标悬停：轻微倾斜 + 高光跟随
-  if (!isTouch) {
-    exhibits.addEventListener('pointermove', e => {
-      const card = e.target.closest('.exhibit'); if (!card) return;
-      const r = card.getBoundingClientRect();
-      const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
-      card.style.setProperty('--mx', x * 100 + '%'); card.style.setProperty('--my', y * 100 + '%');
-      card.style.transform = `rotateX(${(.5 - y) * 7}deg) rotateY(${(x - .5) * 9}deg) translateZ(10px)`;
-    });
-    exhibits.addEventListener('pointerout', e => {
-      const card = e.target.closest('.exhibit');
-      if (card && !card.contains(e.relatedTarget)) card.style.transform = '';
-    });
-  }
-
-  exhibits.addEventListener('click', e => {
-    const card = e.target.closest('.exhibit'); if (!card) return;
-    burst(e.clientX || innerWidth / 2, e.clientY || innerHeight / 2);
-    openStory(+card.dataset.i);
-  });
-
-  function burst(x, y) {
-    if (reduceMotion) return;
-    for (let i = 0; i < 18; i++) {
-      const p = document.createElement('i'); p.className = 'burst';
-      const a = Math.random() * Math.PI * 2, d = 40 + Math.random() * 90;
-      p.style.left = x + 'px'; p.style.top = y + 'px';
-      p.style.setProperty('--dx', Math.cos(a) * d + 'px'); p.style.setProperty('--dy', Math.sin(a) * d + 'px');
-      document.body.appendChild(p); setTimeout(() => p.remove(), 850);
-    }
-  }
-
-  /* =========================================================
-     详情层（故事 / 照片 共用）
-     ========================================================= */
-  const viewer = $('#viewer'), vBody = $('#viewerBody');
-  let vList = [], vIndex = 0, vRender = null, lastFocus = null;
-
-  function openViewer(list, index, render) {
-    vList = list; vIndex = index; vRender = render; lastFocus = document.activeElement;
-    vBody.innerHTML = render(list[index], index);
-    viewer.hidden = false;
-    document.body.style.overflow = 'hidden';
-    requestAnimationFrame(() => viewer.classList.add('is-open'));
-    $('.viewer__close', viewer).focus({ preventScroll: true });
-  }
-  function closeViewer() {
-    viewer.classList.remove('is-open');
-    document.body.style.overflow = '';
-    setTimeout(() => { viewer.hidden = true; vBody.innerHTML = ''; }, 450);
-    lastFocus?.focus?.({ preventScroll: true });
-  }
-  function stepViewer(d) {
-    vIndex = (vIndex + d + vList.length) % vList.length;
-    vBody.innerHTML = vRender(vList[vIndex], vIndex);
-    vBody.scrollTop = 0;
-  }
-  viewer.addEventListener('click', e => {
-    if (e.target.closest('[data-close]')) closeViewer();
-    const nav = e.target.closest('[data-step]'); if (nav) stepViewer(+nav.dataset.step);
-  });
-  addEventListener('keydown', e => {
-    if (viewer.hidden) return;
-    if (e.key === 'Escape') closeViewer();
-    if (e.key === 'ArrowRight') stepViewer(1);
-    if (e.key === 'ArrowLeft') stepViewer(-1);
-  });
-  // 手机上左右滑动切换
-  let sx = 0, sy = 0;
-  viewer.addEventListener('touchstart', e => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
-  viewer.addEventListener('touchend', e => {
-    const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
-    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) stepViewer(dx < 0 ? 1 : -1);
-  }, { passive: true });
-
-  const navBtns = `<div class="viewer__nav"><button type="button" class="glass" data-step="-1" aria-label="上一件">← 上一件</button><button type="button" class="glass" data-step="1" aria-label="下一件">下一件 →</button></div>`;
-
-  function openStory(i) {
-    openViewer(stories, i, s => {
-      const th = themeName(s.theme);
-      const media = s.photos?.length ? s.photos.map(src => `<img src="${esc(src)}" alt="${esc(s.title)}">`).join('') : artHTML('story' + s.no, 'N°' + s.no);
-      return `<div class="viewer__media">${media}</div>
-        <div class="viewer__text">
-          <p class="label">EXHIBIT N°${esc(s.no)} · ${esc(th.en)} · ${esc(th.cn)}</p>
-          <h3>${esc(s.title)}</h3>
-          <div class="viewer__meta"><span class="num">${fmtDate(s.date)}</span><span>${esc(s.place)}</span></div>
-          <p class="viewer__lead">${esc(s.summary)}</p>
-          ${(s.text || []).map(t => `<p>${esc(t)}</p>`).join('')}
-          ${navBtns}
-        </div>`;
-    });
-  }
-
-  function openPhoto(i) {
-    openViewer(S.photos, i, (p, k) => `<div class="viewer__media">${mediaHTML(p.src, 'photo' + k, String(k + 1).padStart(2, '0'))}</div>
-      <div class="viewer__text">
-        <p class="label">FILM ${String(k + 1).padStart(2, '0')} / ${String(S.photos.length).padStart(2, '0')}</p>
-        <h3>${esc(p.title)}</h3>
-        <div class="viewer__meta"><span class="num">${fmtDate(p.date)}</span><span>${esc(p.place)}</span></div>
-        <p>${esc(p.text)}</p>
-        ${navBtns}
-      </div>`);
-  }
-
-  /* =========================================================
-     时间长廊
-     ========================================================= */
-  const track = $('#corridorTrack'), corridor = $('#corridor'), railFill = $('#railFill');
-  track.insertAdjacentHTML('beforeend', S.timeline.map((n, i) => {
-    const showChapter = i === 0 || S.timeline[i - 1].chapter !== n.chapter;
-    return `<div class="node" data-i="${i}">
-      <div class="node__chapter">${showChapter ? esc(n.chapter) : ''}</div>
-      <p class="node__date">${fmtDate(n.date)}</p>
-      <span class="node__dot" aria-hidden="true"></span>
-      <div class="node__card glass">
-        <span class="node__no">N°${esc(n.no)}</span>
-        <span class="node__place">${esc(n.place)}</span>
-        <h3 class="node__title">${esc(n.title)}</h3>
-        <p class="node__line">${esc(n.line)}</p>
-      </div>
-    </div>`;
-  }).join(''));
-  const nodes = $$('.node', track);
-
-  // 节点依次亮起：桌面看横向滚动位置，手机看纵向位置
-  function updateCorridor() {
-    let lit = -1;
-    if (isMobile()) {
-      const line = innerHeight * .62;
-      nodes.forEach((n, i) => { if (n.getBoundingClientRect().top < line) lit = i; });
-      const tr = track.getBoundingClientRect();
-      const fill = Math.max(0, Math.min(1, (line - tr.top) / tr.height));
-      railFill.parentElement.style.setProperty('--fill', fill * 100 + '%');
-    } else {
-      const cr = corridor.getBoundingClientRect();
-      if (cr.top > innerHeight * .8 || cr.bottom < 0) return;
-      const line = cr.left + cr.width * .72;
-      nodes.forEach((n, i) => { if (n.getBoundingClientRect().left < line) lit = i; });
-      const last = nodes[Math.max(0, lit)];
-      railFill.style.width = lit < 0 ? '0' : (last.offsetLeft + 6) + 'px';
-    }
-    nodes.forEach((n, i) => { n.classList.toggle('is-lit', i <= lit); n.classList.toggle('is-current', i === lit); });
-  }
-  corridor.addEventListener('scroll', updateCorridor, { passive: true });
-  addEventListener('scroll', updateCorridor, { passive: true });
-
-  // 桌面端：鼠标拖动 + 竖向滚轮转为横向前进
-  if (!isTouch) {
-    let down = false, startX = 0, startL = 0;
-    corridor.addEventListener('pointerdown', e => { if (isMobile()) return; down = true; startX = e.clientX; startL = corridor.scrollLeft; corridor.classList.add('is-drag'); });
-    addEventListener('pointerup', () => { down = false; corridor.classList.remove('is-drag'); });
-    addEventListener('pointermove', e => { if (down) corridor.scrollLeft = startL - (e.clientX - startX); });
-    corridor.addEventListener('wheel', e => {
-      if (isMobile() || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
-      const max = corridor.scrollWidth - corridor.clientWidth;
-      const atEnd = (e.deltaY > 0 && corridor.scrollLeft >= max - 2) || (e.deltaY < 0 && corridor.scrollLeft <= 2);
-      if (atEnd) return;                // 走到尽头时让页面继续向下
-      e.preventDefault();
-      corridor.scrollLeft += e.deltaY;
-    }, { passive: false });
-  }
-
-  /* =========================================================
-     环形胶片墙
-     ========================================================= */
-  const ring = $('#filmRing'), stage = $('#filmStage');
-  // 照片太少时重复填充，保证环形完整
-  const minCount = 10;
-  const filmItems = [];
-  for (let k = 0; filmItems.length < Math.max(minCount, S.photos.length); k++) filmItems.push(k % S.photos.length);
-  ring.innerHTML = filmItems.map((pi, k) => {
-    const p = S.photos[pi];
-    return `<button type="button" class="film glass" data-p="${pi}" aria-label="${esc(p.title)}">
-      <div class="film__img">${mediaHTML(p.src, 'photo' + pi, String(pi + 1).padStart(2, '0'))}</div>
-      <div class="film__cap"><span>${esc(p.title)}</span><span class="num">${fmtDate(p.date).slice(2)}</span></div>
-    </button>`;
-  }).join('');
-  const films = $$('.film', ring);
-
-  let angle = 0, speed = .09, targetSpeed = .09, radius = 0, filmVisible = false;
-  const BASE = .09, SLOW = .025;            // 每帧度数；悬停时减速但不停
-  function layoutFilm() {
-    const fw = isMobile() ? Math.min(150, innerWidth * .36) : Math.min(240, Math.max(170, innerWidth * .13));
-    stage.style.setProperty('--fw', fw + 'px');
-    radius = Math.max(fw * 1.9, (fw + 26) * films.length / (2 * Math.PI));
-    films.forEach((f, k) => { f.style.transform = `rotateY(${k * 360 / films.length}deg) translateZ(${radius}px)`; });
-  }
-  // 按时间旋转：高刷屏上不会转得更快；看不见时完全停掉循环
-  let filmRaf = 0, filmLast = 0;
-  function spinFilm(t) {
-    const f = filmLast ? Math.min(3, (t - filmLast) / 16.67) : 1; filmLast = t;
-    if (!dragging) {
-      speed += (targetSpeed - speed) * Math.min(1, .06 * f);
-      angle -= speed * f;
-    }
-    ring.style.transform = `translateZ(${-radius}px) rotateY(${angle.toFixed(2)}deg)`;
-    filmRaf = filmVisible && !document.hidden ? requestAnimationFrame(spinFilm) : 0;
-  }
-  const kickFilm = () => { if (!filmRaf && filmVisible && !document.hidden) { filmLast = 0; filmRaf = requestAnimationFrame(spinFilm); } };
-  new IntersectionObserver(([en]) => { filmVisible = en.isIntersecting; kickFilm(); }).observe(stage);
-  document.addEventListener('visibilitychange', kickFilm);
-  if (!isTouch) {
-    stage.addEventListener('pointerenter', () => { targetSpeed = SLOW; });
-    stage.addEventListener('pointerleave', () => { targetSpeed = BASE; });
-  }
-  // 拖动旋转（鼠标和手指都支持）
-  let dragging = false, dragX = 0, dragA = 0, moved = 0;
-  stage.addEventListener('pointerdown', e => {
-    dragging = true; moved = 0; dragX = e.clientX; dragA = angle;
-    stage.classList.add('is-drag');
-  });
-  addEventListener('pointermove', e => {
-    if (!dragging) return;
-    const dx = e.clientX - dragX; moved = Math.max(moved, Math.abs(dx));
-    angle = dragA + dx * .22;
-  }, { passive: true });
-  const endDrag = () => { if (!dragging) return; dragging = false; stage.classList.remove('is-drag'); };
-  addEventListener('pointerup', endDrag); addEventListener('pointercancel', endDrag);
-  ring.addEventListener('click', e => {
-    const f = e.target.closest('.film');
-    if (!f || moved > 8) return;           // 拖动后松手不算点击
-    openPhoto(+f.dataset.p);
-  });
-
-  /* =========================================================
-     纪念日长廊
-     ========================================================= */
-  const plaquesEl = $('#plaques');
-  function nextAnnual(d) {
-    const t = today();
-    let n = new Date(t.getFullYear(), d.getMonth(), d.getDate());
-    if (n < t) n = new Date(t.getFullYear() + 1, d.getMonth(), d.getDate());
-    return n;
-  }
-  function plaqueCount(p) {
-    const d = parseDate(p.date); if (!d) return { big: '—', unit: '', sub: '日期待填写', target: null };
-    const t = today();
-    if (p.mode === 'since') {
-      const n = daysBetween(d, t);
-      return n >= 0 ? { big: n + 1, unit: '天', sub: '已经过去', target: null } : { big: -n, unit: '天后', sub: '即将到来', target: d };
-    }
-    const target = p.mode === 'annual' ? nextAnnual(d) : d;
-    const n = daysBetween(t, target);
-    if (n === 0) return { big: '今天', unit: '', sub: '就是今天', target: null };
-    if (n < 0) return { big: -n, unit: '天', sub: '已经过去', target: null };
-    const extra = p.mode === 'annual' ? `第 ${target.getFullYear() - d.getFullYear()} 个 · ` : '';
-    return { big: n, unit: '天后', sub: extra, target };
-  }
-  plaquesEl.innerHTML = S.dates.map((p, i) => `<div class="plaque glass reveal" data-i="${i}" style="transition-delay:${i * 70}ms">
-      <span class="plaque__no">${esc(p.no)}</span>
-      <p class="plaque__en">${esc(p.en)}</p>
-      <h3 class="plaque__name">${esc(p.name)}</h3>
-      <p class="plaque__date">${fmtDate(p.date)}</p>
-      <div class="plaque__count"><strong></strong><span></span></div>
-      <p class="plaque__sub"></p>
-    </div>`).join('');
-  observeReveal(plaquesEl);
-  const pad = n => String(n).padStart(2, '0');
-  function tickPlaques() {
-    $$('.plaque', plaquesEl).forEach(el => {
-      const c = plaqueCount(S.dates[+el.dataset.i]);
-      $('strong', el).textContent = c.big;
-      $('.plaque__count span', el).textContent = c.unit;
-      let sub = c.sub;
-      if (c.target) {     // 精确到秒的倒计时
-        const ms = Math.max(0, c.target - Date.now()) % DAY;
-        sub += `${pad(Math.floor(ms / 3600000))}:${pad(Math.floor(ms / 60000) % 60)}:${pad(Math.floor(ms / 1000) % 60)}`;
-      }
-      $('.plaque__sub', el).textContent = sub;
-    });
-  }
-  tickPlaques(); setInterval(tickPlaques, 1000);
-
-  /* =========================================================
-     发光地图
-     ========================================================= */
-  const svg = $('#mapSvg'), mapCard = $('#mapCard'), mapFrame = $('#mapFrame');
-  const NS = 'http://www.w3.org/2000/svg';
-  let mapDrawn = false;
-
-  function drawMap() {
-    const W = mapFrame.clientWidth, H = mapFrame.clientHeight;
-    if (!W || !H) return;
-    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-    const pl = S.places;
-    const lngs = pl.map(p => p.lng), lats = pl.map(p => p.lat);
-    const minX = Math.min(...lngs), maxX = Math.max(...lngs), minY = Math.min(...lats), maxY = Math.max(...lats);
-    const spanX = Math.max(maxX - minX, .5), spanY = Math.max(maxY - minY, .5);
-    // 手机上卡片在底部弹出，节点区域整体上移，避免被挡住
-    const padX = W * .2, padT = H * (isMobile() ? .14 : .22), padB = H * (isMobile() ? .42 : .22);
-    const k = Math.min((W - padX * 2) / spanX, (H - padT - padB) / spanY);
-    const ox = (W - spanX * k) / 2 - (spanX - (maxX - minX)) * k / 2;
-    const oy = padT + ((H - padT - padB) - spanY * k) / 2 - (spanY - (maxY - minY)) * k / 2;
-    const proj = p => [ox + (p.lng - minX) * k, oy + (maxY - p.lat) * k];
-
-    // 网格
-    let grid = '';
-    const step = Math.max(40, Math.round(Math.min(W, H) / 10));
-    for (let x = step / 2; x < W; x += step) grid += `M${x} 0V${H}`;
-    for (let y = step / 2; y < H; y += step) grid += `M0 ${y}H${W}`;
-
-    // 一条抽象海岸线（装饰）
-    const r = seeded('coast' + pl.length);
-    let coast = `M${W * .62} ${-10}`;
-    for (let i = 1; i <= 8; i++) coast += ` Q${W * (.55 + r() * .35)} ${H * (i - .5) / 8} ${W * (.58 + r() * .3)} ${H * i / 8}`;
-
-    // 路线：相邻地点之间画一条弧线
-    const pts = S.route.map(id => pl.find(p => p.id === id)).filter(Boolean).map(proj);
-    let route = '';
-    pts.forEach(([x, y], i) => {
-      if (!i) { route = `M${x} ${y}`; return; }
-      const [px, py] = pts[i - 1];
-      const mx = (px + x) / 2, my = (py + y) / 2, dx = x - px, dy = y - py;
-      route += ` Q${mx - dy * .25} ${my + dx * .25} ${x} ${y}`;
-    });
-
-    svg.innerHTML = `<defs>
-        <linearGradient id="routeGrad" x1="0" x2="1"><stop offset="0" stop-color="#b8955a"/><stop offset=".5" stop-color="#fff6e2"/><stop offset="1" stop-color="#d9b779"/></linearGradient>
-        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-      </defs>
-      <path class="map-grid" d="${grid}"/>
-      <path class="map-coast" d="${coast}"/>
-      <path class="map-route map-route--wide" d="${route}"/>
-      <path class="map-route" id="routePath" d="${route}"/>
-      ${pl.map(p => {
-        const [x, y] = proj(p);
-        const left = x > W * .7;
-        return `<g class="map-node" data-id="${esc(p.id)}" tabindex="0" role="button" aria-label="${esc(p.name)}" transform="translate(${x.toFixed(1)} ${y.toFixed(1)})">
-          <circle class="hit" r="28"/><circle class="ring" r="14"/><circle class="dot" r="5"/>
-          <text x="${left ? -18 : 18}" y="-2" text-anchor="${left ? 'end' : 'start'}">${esc(p.name)}</text>
-          <text class="en" x="${left ? -18 : 18}" y="14" text-anchor="${left ? 'end' : 'start'}">${esc(p.en)}</text>
-        </g>`;
-      }).join('')}`;
-
-    // 路线描绘动画
-    const rp = $('#routePath', svg), len = rp.getTotalLength();
-    [rp, rp.previousElementSibling].forEach(el => {
-      el.style.strokeDasharray = len; el.style.strokeDashoffset = mapDrawn ? 0 : len;
-    });
-  }
-  function animateRoute() {
-    if (mapDrawn) return; mapDrawn = true;
-    $$('.map-route', svg).forEach(el => { el.style.transition = 'stroke-dashoffset 1.4s cubic-bezier(.22,.8,.24,1)'; el.style.strokeDashoffset = 0; });
-  }
-  function showPlace(id) {
-    const p = S.places.find(x => x.id === id); if (!p) return;
-    $$('.map-node', svg).forEach(n => n.classList.toggle('is-active', n.dataset.id === id));
-    mapCard.innerHTML = `<button type="button" class="map-card__close" aria-label="关闭">×</button>
-      <div class="map-card__art">${mediaHTML(p.photo, 'place' + p.id, p.en)}</div>
-      <p class="label">${esc(p.en)}</p><h3>${esc(p.name)}</h3><p>${esc(p.memory)}</p>
-      <div class="map-card__meta"><span class="num">${fmtDate(p.date)}</span><span>N°${esc(p.no)}</span></div>`;
-    mapCard.hidden = false;
-    mapCard.style.animation = 'none'; void mapCard.offsetWidth; mapCard.style.animation = '';
-  }
-  svg.addEventListener('click', e => { const n = e.target.closest('.map-node'); if (n) showPlace(n.dataset.id); });
-  svg.addEventListener('keydown', e => { const n = e.target.closest('.map-node'); if (n && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showPlace(n.dataset.id); } });
-  mapCard.addEventListener('click', e => {
-    if (e.target.closest('.map-card__close')) { mapCard.hidden = true; $$('.map-node', svg).forEach(n => n.classList.remove('is-active')); }
-  });
-  new IntersectionObserver(([en]) => { if (en.isIntersecting) setTimeout(animateRoute, 200); }, { threshold: .35 }).observe(mapFrame);
-
-  /* =========================================================
-     结尾
-     ========================================================= */
-  const E = S.ending;
-  $('#unfinished').innerHTML = `<div><div class="unfinished__no">${esc(E.unfinished.no)}</div>
-    <p class="unfinished__t">${esc(E.unfinished.title)}</p>
-    <p class="unfinished__en">${esc(E.unfinished.en)}</p><span class="unfinished__cursor"></span></div>`;
-  $('#endingText').innerHTML = E.lines.map((l, i) => `<p class="reveal" style="transition-delay:${200 + i * 350}ms">${esc(l)}</p>`).join('');
-  function drawEndingLines() {
-    const el = $('#endingLines'), W = el.clientWidth, H = el.clientHeight;
-    el.setAttribute('viewBox', `0 0 ${W} ${H}`);
-    const r = seeded('ending');
-    el.innerHTML = Array.from({ length: 5 }, (_, i) => {
-      const y = H * (.2 + i * .15);
-      return `<path d="M-20 ${y + r() * 80} C${W * .3} ${y - 120 + r() * 240} ${W * .7} ${y - 120 + r() * 240} ${W + 20} ${y + r() * 80}" style="opacity:${.25 + r() * .5}"/>`;
-    }).join('');
-  }
-
-  /* =========================================================
-     视差滚动：每个元素按 data-depth 相对所在展厅移动
-     展厅吸附到顶部时偏移为 0，所以停下来时版面是对齐的
-     ========================================================= */
-  const depthEls = reduceMotion ? [] : $$('[data-depth]').map(el => ({ el, d: +el.dataset.depth, sec: el.closest('.sec') }));
-  let pxTick = false;
-  function parallax() {
-    pxTick = false;
-    const k = isMobile() ? .5 : 1;
-    for (const o of depthEls) {
-      const top = o.sec.getBoundingClientRect().top;
-      if (top > innerHeight * 1.5 || top < -o.sec.offsetHeight - innerHeight * .5) continue;
-      const py = Math.max(-220, Math.min(220, -top * o.d * k));
-      o.el.style.setProperty('--py', py.toFixed(1) + 'px');
-    }
-  }
-  addEventListener('scroll', () => { if (!pxTick) { pxTick = true; requestAnimationFrame(parallax); } }, { passive: true });
-
-  /* =========================================================
-     滚动吸附
-     桌面：滚轮一格 = 走到下一个停靠点（展厅顶部；比一屏高的展厅中间也有停靠点）
-     手机：正常滑动，停下后若离某个展厅顶部很近，就贴过去
-     ========================================================= */
-  const secs = $$('.sec');
-  const docEl = document.documentElement;
-  const maxScroll = () => docEl.scrollHeight - innerHeight;
-  function stops() {
-    const list = [];
-    for (const s of secs) {
-      const top = s.offsetTop, h = s.offsetHeight;
-      list.push(top);
-      // 高展厅：每隔约 0.8 屏加一个停靠点，最后一个让展厅底部对齐屏幕底部
-      if (h > innerHeight * 1.15) {
-        const end = top + h - innerHeight;
-        for (let y = top + innerHeight * .8; y < end - innerHeight * .2; y += innerHeight * .8) list.push(Math.round(y));
-        list.push(end);
-      }
-    }
-    return [...new Set(list.map(y => Math.min(Math.max(0, y), maxScroll())))].sort((a, b) => a - b);
-  }
-  let animating = false, lastWheel = 0, animId = 0;
-  function glideTo(y, dur = 900) {
-    const from = scrollY, dist = y - from, id = ++animId;
-    if (Math.abs(dist) < 2) return;
-    animating = true;
-    const t0 = performance.now();
-    const ease = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-    (function step(t) {
-      if (id !== animId) return;
-      const k = Math.min(1, (t - t0) / dur);
-      // 旧版 Safari 不认 behavior:'instant'，改为临时关掉 CSS 平滑滚动
-      docEl.style.scrollBehavior = 'auto';
-      scrollTo(0, from + dist * ease(k));
-      if (k < 1) requestAnimationFrame(step); else { animating = false; docEl.style.scrollBehavior = ''; }
-    })(t0);
-  }
-  window.__glideTo = glideTo;
-  const blocked = () => !viewer.hidden || plates.classList.contains('is-open') || document.body.classList.contains('is-locked');
-
-  if (!isTouch && !reduceMotion) {
-    addEventListener('wheel', e => {
-      if (e.defaultPrevented || e.ctrlKey || blocked()) return;    // 时间长廊横向滚动、缩放、弹层打开时不接管
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
-      e.preventDefault();
-      const now = performance.now(), gap = now - lastWheel;
-      lastWheel = now;
-      // 动画进行中、或触控板惯性还在持续输入时，忽略，避免一下跳两页
-      if (animating || gap < 160 || Math.abs(e.deltaY) < 4) return;
-      const list = stops(), cur = scrollY, dir = Math.sign(e.deltaY);
-      const next = dir > 0 ? list.find(y => y > cur + 4) : [...list].reverse().find(y => y < cur - 4);
-      if (next !== undefined) glideTo(next);
-    }, { passive: false });
-
-    addEventListener('keydown', e => {
-      if (blocked() || /input|textarea/i.test(e.target.tagName)) return;
-      const keys = { PageDown: 1, ArrowDown: 1, ' ': 1, PageUp: -1, ArrowUp: -1 };
-      const dir = keys[e.key]; if (!dir || animating) return;
-      e.preventDefault();
-      const list = stops(), cur = scrollY;
-      const next = dir > 0 ? list.find(y => y > cur + 4) : [...list].reverse().find(y => y < cur - 4);
-      if (next !== undefined) glideTo(next, 800);
-    });
-  }
-
-  // 手机 / 触屏：滑动停下 150ms 后检查是否贴近展厅顶部
-  if (isTouch && !reduceMotion) {
-    let st, touching = false;
-    addEventListener('touchstart', () => { touching = true; clearTimeout(st); }, { passive: true });
-    addEventListener('touchend', () => { touching = false; }, { passive: true });
-    addEventListener('scroll', () => {
-      clearTimeout(st);
-      if (animating) return;
-      st = setTimeout(() => {
-        if (touching || blocked()) return;
-        const cur = scrollY;
-        const near = secs.map(s => s.offsetTop).find(y => Math.abs(y - cur) < innerHeight * .22 && Math.abs(y - cur) > 2);
-        if (near !== undefined) glideTo(near, 550);
-      }, 150);
-    }, { passive: true });
-  }
-
-  // 导航和"回到大厅"也走同一套动画，速度一致
-  document.addEventListener('click', e => {
-    const a = e.target.closest('a[href^="#"]'); if (!a) return;
-    const t = $(a.getAttribute('href')); if (!t) return;
-    e.preventDefault();
-    glideTo(t.offsetTop, 1000);
-    history.replaceState(null, '', a.getAttribute('href'));
-  });
-
-  /* =========================================================
-     液态玻璃：高光跟随鼠标
-     ========================================================= */
-  if (!isTouch) {
-    let lit = null, gTick = false, gx = 0, gy = 0;
-    const paint = () => {
-      gTick = false;
-      const g = document.elementFromPoint(gx, gy)?.closest('.glass');
-      if (lit && lit !== g) { lit.style.removeProperty('--lx'); lit.style.removeProperty('--ly'); }
-      lit = g;
-      if (!g) return;
-      const r = g.getBoundingClientRect();
-      g.style.setProperty('--lx', (gx - r.left).toFixed(0) + 'px');
-      g.style.setProperty('--ly', (gy - r.top).toFixed(0) + 'px');
-    };
-    addEventListener('pointermove', e => { gx = e.clientX; gy = e.clientY; if (!gTick) { gTick = true; requestAnimationFrame(paint); } }, { passive: true });
-  }
-
-  /* =========================================================
-     初始化与尺寸变化
-     ========================================================= */
-  ['#hall .reveal', '.sec__head.reveal', '#ending .reveal'].forEach(s => $$(s).forEach(el => revealIO.observe(el)));
-  function layout() { sizeCanvas(); layoutFilm(); drawMap(); drawEndingLines(); updateCorridor(); parallax(); }
-  let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(layout, 150); });
-  layout(); spinFilm();
-  // 直接带锚点打开或刷新时，跳过入口
-  if (location.hash && location.hash !== '#hall') $('#enterBtn').click();
+  musicBtn.addEventListener('click', () => { playing ? pause() : play(); });
 })();
