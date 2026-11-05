@@ -16,28 +16,33 @@
   <!-- ── 外层首页 ─────────────────────────────────────────── -->
   <section class="home" id="home" aria-labelledby="coverTitle">
     <div class="home__aura" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="home__wall" id="homeWall" aria-hidden="true"></div>
     <div class="home__inner">
       <p class="eyebrow home__eyebrow"><span class="eyebrow__n">00</span><span>PROLOGUE</span></p>
       <h1 class="cover__title home__title" id="coverTitle">我们</h1>
       <p class="cover__sub home__sub" id="coverSub">A LIVING ARCHIVE OF TWO</p>
 
       <div class="home__cards">
-        <button class="home-card glass" type="button" data-enter="p-time">
+        <button class="home-card glass" type="button" data-enter="p-time" style="--ar:6/5">
+          <span class="home-card__pic" aria-hidden="true"><img data-home-pic="0" alt="" loading="lazy" decoding="async"></span>
           <span class="home-card__k">DAYS TOGETHER</span>
           <span class="home-card__v"><b id="daysNum">0000</b><small>天</small></span>
           <span class="home-card__s" id="sinceLine">自 —</span>
         </button>
-        <button class="home-card glass" type="button" data-enter="p-places">
+        <button class="home-card glass" type="button" data-enter="p-places" style="--ar:3/2">
+          <span class="home-card__pic" aria-hidden="true"><img data-home-pic="1" alt="" loading="lazy" decoding="async"></span>
           <span class="home-card__k">PLACES</span>
           <span class="home-card__v"><b id="homePlaces">0</b><small>座城市</small></span>
           <span class="home-card__s">一起去过的地方</span>
         </button>
-        <button class="home-card glass" type="button" data-enter="p-memories">
+        <button class="home-card glass" type="button" data-enter="p-memories" style="--ar:3/2">
+          <span class="home-card__pic" aria-hidden="true"><img data-home-pic="2" alt="" loading="lazy" decoding="async"></span>
           <span class="home-card__k">LITTLE MOMENTS</span>
           <span class="home-card__v"><b id="homeMoments">0</b><small>个瞬间</small></span>
           <span class="home-card__s">吃过的、玩过的</span>
         </button>
-        <button class="home-card glass" type="button" data-enter="p-dates">
+        <button class="home-card glass" type="button" data-enter="p-dates" style="--ar:6/5">
+          <span class="home-card__pic" aria-hidden="true"><img data-home-pic="3" alt="" loading="lazy" decoding="async"></span>
           <span class="home-card__k">NEXT ANNIVERSARY</span>
           <span class="home-card__v"><b id="homeNext">—</b><small id="homeNextUnit">天</small></span>
           <span class="home-card__s" id="homeNextName">下一个纪念日</span>

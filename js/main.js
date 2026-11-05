@@ -731,6 +731,18 @@
   let fadeTimer = 0;
   $('#homePlaces').textContent = String(places.length);
   $('#homeMoments').textContent = String(memoryEntries.length);
+  // 首页卡片配图 + 背景照片墙（两列错落高度的瀑布流）
+  const homePics = memoryEntries.map(e => e.item.src).filter(Boolean);
+  // 卡片配图只用「吃饭」照片：都是实拍，不会挑到聊天截图
+  const cardPics = FOOD.map(f => f.src).filter(Boolean);
+  const pickPic = i => cardPics.length ? cardPics[(i * 9 + 2) % cardPics.length] : '';
+  $$('[data-home-pic]').forEach(img => {
+    const src = pickPic(+img.dataset.homePic);
+    if (src) img.src = src; else img.closest('.home-card__pic').remove();
+  });
+  const wallRatios = ['3 / 4', '1 / 1', '4 / 5', '2 / 3', '5 / 6', '3 / 4'];
+  $('#homeWall').innerHTML = homePics.slice(0, 18).map((src, i) =>
+    `<span style="aspect-ratio:${wallRatios[i % wallRatios.length]}"><img src="${esc(src)}" alt="" loading="lazy" decoding="async"></span>`).join('');
   const paintNext = () => {
     const next = DATES.filter(d => d.mode === 'annual').map(d => ({ d, c: countdown(d) }))
       .sort((a, b) => (a.c.isToday ? -1 : +a.c.n) - (b.c.isToday ? -1 : +b.c.n))[0];
