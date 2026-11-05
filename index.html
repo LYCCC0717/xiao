@@ -9,12 +9,53 @@
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/music.css">
 </head>
-<body>
+<body class="is-home">
+  <div class="photo-bg" id="photoBg" aria-hidden="true"></div>
   <div class="veil" aria-hidden="true"></div>
 
+  <!-- ── 外层首页 ─────────────────────────────────────────── -->
+  <section class="home" id="home" aria-labelledby="coverTitle">
+    <div class="home__aura" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="home__inner">
+      <p class="eyebrow home__eyebrow"><span class="eyebrow__n">00</span><span>PROLOGUE</span></p>
+      <h1 class="cover__title home__title" id="coverTitle">我们</h1>
+      <p class="cover__sub home__sub" id="coverSub">A LIVING ARCHIVE OF TWO</p>
+
+      <div class="home__cards">
+        <button class="home-card glass" type="button" data-enter="p-time">
+          <span class="home-card__k">DAYS TOGETHER</span>
+          <span class="home-card__v"><b id="daysNum">0000</b><small>天</small></span>
+          <span class="home-card__s" id="sinceLine">自 —</span>
+        </button>
+        <button class="home-card glass" type="button" data-enter="p-places">
+          <span class="home-card__k">PLACES</span>
+          <span class="home-card__v"><b id="homePlaces">0</b><small>座城市</small></span>
+          <span class="home-card__s">一起去过的地方</span>
+        </button>
+        <button class="home-card glass" type="button" data-enter="p-memories">
+          <span class="home-card__k">LITTLE MOMENTS</span>
+          <span class="home-card__v"><b id="homeMoments">0</b><small>个瞬间</small></span>
+          <span class="home-card__s">吃过的、玩过的</span>
+        </button>
+        <button class="home-card glass" type="button" data-enter="p-dates">
+          <span class="home-card__k">NEXT ANNIVERSARY</span>
+          <span class="home-card__v"><b id="homeNext">—</b><small id="homeNextUnit">天</small></span>
+          <span class="home-card__s" id="homeNextName">下一个纪念日</span>
+        </button>
+      </div>
+
+      <button class="home__start glass glass--pill glass--tilt" id="startBtn" type="button" data-enter="p-places">
+        <span class="home__start-label">开始回忆</span>
+        <span class="home__start-go" aria-hidden="true">→</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- ── 内层：点击「开始回忆」后淡入 ─────────────────────── -->
+  <div class="stage" id="stage">
   <!-- ── 顶部 / 常驻的玻璃工具条 ───────────────────────────── -->
   <header class="hud">
-    <a class="hud__brand glass glass--pill" href="#p-cover" data-jump="0">
+    <a class="hud__brand glass glass--pill" href="#" aria-label="回到首页">
       <svg class="mark" viewBox="0 0 40 40" aria-hidden="true">
         <circle cx="20" cy="20" r="19.2" fill="none" stroke="currentColor" stroke-opacity=".5"/>
         <path d="M20 9 L22.4 17.6 L31 20 L22.4 22.4 L20 31 L17.6 22.4 L9 20 L17.6 17.6 Z"/>
@@ -31,7 +72,7 @@
       <div class="hud__pager glass glass--pill" aria-hidden="true">
         <b id="pagerNow">01</b>
         <i class="hud__track"><b id="pagerFill"></b></i>
-        <span id="pagerAll">06</span>
+        <span id="pagerAll">05</span>
       </div>
     </div>
   </header>
@@ -40,27 +81,7 @@
   <nav class="rail" id="rail" aria-label="章节导航"></nav>
 
   <!-- ── 翻页容器 ─────────────────────────────────────────── -->
-  <main class="deck" id="deck">
-
-    <!-- 00 · 序 -->
-    <section class="page page--cover" id="p-cover" data-label="序" aria-labelledby="coverTitle">
-      <span class="ghost" data-par="-.14" aria-hidden="true">00</span>
-      <div class="page__inner">
-        <p class="eyebrow"><span class="eyebrow__n">00</span><span>PROLOGUE</span></p>
-
-        <h1 class="cover__title" id="coverTitle">我们</h1>
-        <p class="cover__sub" id="coverSub">A LIVING ARCHIVE OF TWO</p>
-
-        <div class="cover__day glass glass--wide">
-          <div class="cover__day-num"><b id="daysNum">0000</b><span>天</span></div>
-          <div class="cover__day-meta">
-            <p>DAYS TOGETHER</p>
-            <p class="dim" id="sinceLine">自 —</p>
-          </div>
-        </div>
-
-      </div>
-    </section>
+  <main class="deck" id="deck" tabindex="-1">
 
     <!-- 01 · 去过的地方 -->
     <section class="page" id="p-places" data-label="地点" aria-labelledby="placesTitle">
@@ -96,35 +117,35 @@
       </div>
     </section>
 
-    <!-- 04 · 时间长廊 -->
+    <!-- 03 · 时间长廊 -->
     <section class="page" id="p-time" data-label="时间" aria-labelledby="timeTitle">
-      <span class="ghost" data-par="-.1" aria-hidden="true">04</span>
+      <span class="ghost" data-par="-.1" aria-hidden="true">03</span>
       <div class="page__inner">
         <header class="head">
-          <p class="eyebrow"><span class="eyebrow__n">04</span><span>CORRIDOR</span></p>
+          <p class="eyebrow"><span class="eyebrow__n">03</span><span>CORRIDOR</span></p>
           <h2 class="head__title" id="timeTitle">时间长廊</h2>
         </header>
         <ol class="time" id="time"></ol>
       </div>
     </section>
 
-    <!-- 05 · 纪念日 -->
+    <!-- 04 · 纪念日 -->
     <section class="page" id="p-dates" data-label="纪念日" aria-labelledby="datesTitle">
-      <span class="ghost" data-par="-.1" aria-hidden="true">05</span>
+      <span class="ghost" data-par="-.1" aria-hidden="true">04</span>
       <div class="page__inner">
         <header class="head">
-          <p class="eyebrow"><span class="eyebrow__n">05</span><span>ANNIVERSARY</span></p>
+          <p class="eyebrow"><span class="eyebrow__n">04</span><span>ANNIVERSARY</span></p>
           <h2 class="head__title" id="datesTitle">纪念日</h2>
         </header>
         <div class="dates" id="dates"></div>
       </div>
     </section>
 
-    <!-- 06 · 未完 -->
+    <!-- 05 · 未完 -->
     <section class="page page--end" id="p-end" data-label="未完" aria-labelledby="endTitle">
-      <span class="ghost" data-par="-.1" aria-hidden="true">06</span>
+      <span class="ghost" data-par="-.1" aria-hidden="true">05</span>
       <div class="page__inner">
-        <p class="eyebrow"><span class="eyebrow__n">06</span><span>TO BE CONTINUED</span></p>
+        <p class="eyebrow"><span class="eyebrow__n">05</span><span>TO BE CONTINUED</span></p>
         <h2 class="end__title" id="endTitle">未完</h2>
         <div class="end__lines" id="endLines"></div>
         <button class="cta glass glass--tilt" id="endBtn" type="button">
@@ -135,14 +156,15 @@
 
         <footer class="foot">
           <span class="dim">© <span id="year">2026</span> · 我们</span>
-          <button class="foot__top glass glass--pill" id="topBtn" type="button">回到封面 ↑</button>
+          <button class="foot__top glass glass--pill" id="topBtn" type="button">回到首页 ↑</button>
         </footer>
       </div>
     </section>
   </main>
+  </div>
 
   <!-- ── 音乐 ─────────────────────────────────────────────── -->
-  <aside id="musicPlayer" aria-label="留声机音乐播放器"></aside>
+  <aside id="musicPlayer" aria-label="唱片机音乐播放器"></aside>
 
   <script src="js/data.js"></script>
   <script src="js/food-data.js"></script>
@@ -150,6 +172,7 @@
   <script src="js/time-data.js"></script>
   <script src="js/dates-data.js"></script>
   <script src="js/china-map.js"></script>
+  <script src="js/photo-bg.js"></script>
   <script src="js/glass.js"></script>
   <script src="js/main.js"></script>
   <script src="js/music.js"></script>

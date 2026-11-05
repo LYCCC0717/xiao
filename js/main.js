@@ -45,7 +45,7 @@
   daysMini.textContent = pad2(days);
   $('#sinceLine').textContent = since ? '自 ' + fmt(S.togetherSince) + ' 起' : '日期待定';
   dayBtn.title = since ? '自 ' + fmt(S.togetherSince) + ' 起，一起走过 ' + days + ' 天' : '';
-  dayBtn.addEventListener('click', () => go(0));
+  dayBtn.addEventListener('click', () => showHome());
 
   let counted = false;
   let countStop = false;
@@ -277,7 +277,7 @@
 
   rail.innerHTML = pages.map((p, i) => `
     <button class="rail__dot glass" type="button" data-page="${i}" aria-current="${i === 0}" aria-label="${esc(p.dataset.label || '第 ' + (i + 1) + ' 页')}">
-      <span>${pad2(i)}</span><span class="rail__tip">${esc(p.dataset.label || '')}</span>
+      <span>${pad2(i + 1)}</span><span class="rail__tip">${esc(p.dataset.label || '')}</span>
     </button>`).join('');
 
   let pagesM = [];
@@ -307,9 +307,8 @@
     if (i === active) return;
     active = i;
     $$('.rail__dot', rail).forEach((b, k) => b.setAttribute('aria-current', k === i ? 'true' : 'false'));
-    pagerNow.textContent = pad2(i);
-    try { history.replaceState(null, '', '#' + pages[i].id); } catch (e) { /* file:// 下忽略 */ }
-    if (i === 0) countUp();
+    pagerNow.textContent = pad2(i + 1);
+    if (!document.body.classList.contains('is-home')) try { history.replaceState(null, '', '#' + pages[i].id); } catch (e) { /* file:// 下忽略 */ }
   };
 
   const render = () => {
@@ -412,7 +411,6 @@
 
   window.__deck = {
     go, step, measure, render, pages,
-    setSettle(on) { settleEnabled = !!on; },   // 调试用：关掉「松手转完」
     get index() { return active; },
     get list() { return pagesM; }
   };
@@ -562,64 +560,80 @@
   window.__strips = {};
   window.__food = null;
 
-  // Only the cover-to-places boundary keeps a settling point.
-  let settleTimer = 0;
-  let settleEnabled = true;
-  let autoMoving = false;
+  // 不做滚动吸附：内层页面全程自由滚动。
   let autoPauseUntil = 0;
-  let autoDirection = 1;
-  let autoScrollEventUntil = 0;
-  const settle = () => {
-    if (gliding) return;
-    if (!settleEnabled || autoMoving) return;
-    const st = deck.scrollTop;
-    const first = pagesM[0];
-    const second = pagesM[1];
-    if (!first || !second || st < first.top || st >= second.top) return;
-    const toFirst = st - first.top;
-    const toSecond = second.top - st;
-    const distance = Math.min(toFirst, toSecond);
-    if (distance < 10) return;
-    glideTo(toFirst < toSecond ? first.top : second.top, reduce ? 180 : clamp(260 + distance * .12, 300, 460));
-  };
+  const AUTO_RESUME = 700;   // 手动滚动 / 触摸停手后 0.7s 继续自动滚动
+  let touching = false;
+  // 自动滚动自己记一个小数位置：每帧只走 0.2~0.5px，直接写 scrollTop 会被浏览器取整吞掉，永远不动
+  let autoPos = null;
+  let autoWritten = -1;
+  deck.addEventListener('touchstart', () => { touching = true; }, { passive: true });
+  // 手指离开屏幕时重新计 0.7s，按住再久，松手后也要等满 0.7s 才继续
+  const releaseTouch = () => { touching = false; autoPauseUntil = performance.now() + AUTO_RESUME; autoPos = null; };
+  addEventListener('touchend', releaseTouch, { passive: true });
+  addEventListener('touchcancel', releaseTouch, { passive: true });
 
   deck.addEventListener('scroll', () => {
-    if (autoMoving || performance.now() < autoScrollEventUntil) return;
-    clearTimeout(settleTimer);
-    settleTimer = setTimeout(settle, 240);
-    autoPauseUntil = performance.now() + 2400;
+    // 和自动滚动最后写入的位置一致 → 是自动滚动触发的；否则是用户自己在滚
+    if (Math.abs(deck.scrollTop - autoWritten) > 2) {
+      autoPos = null;
+      autoPauseUntil = performance.now() + AUTO_RESUME;
+    }
     if (queued) return;
     queued = requestAnimationFrame(() => { queued = 0; render(); });
   }, { passive: true });
 
+  // 照片墙自动滚动：一直往下走；到底后照片淡出、回到第一张、再淡入，循环展示，不再来回倒退。
+  const AUTO_SPEED = 30;            // px/s
+  const LOOP_FADE = reduce ? 0 : 520;
+  let looping = false;
   let autoLastTime = performance.now();
+  const gridTopInDeck = () => memoryGrid.getBoundingClientRect().top - deck.getBoundingClientRect().top + deck.scrollTop;
+  const setAutoScroll = top => {
+    autoPos = top;
+    deck.scrollTop = top;
+    autoWritten = deck.scrollTop;
+    render();
+  };
+  const loopMemories = (page, max) => {
+    looping = true;
+    memoryGrid.classList.add('is-looping');
+    setTimeout(() => {
+      const memoryIndex = pages.indexOf(memoryPage);
+      // 淡出途中用户自己滚走了，就不要再把他拉回去
+      if (active === memoryIndex && deck.scrollTop >= max - 40 && deck.scrollTop <= max + 2) {
+        setAutoScroll(clamp(gridTopInDeck() - 24, page.top, max));
+      }
+      memoryGrid.classList.remove('is-looping');
+      autoPauseUntil = performance.now() + LOOP_FADE + 600;   // 淡入完成、停一下再继续走
+      setTimeout(() => { looping = false; }, LOOP_FADE);
+    }, LOOP_FADE);
+  };
   const autoScroll = now => {
-    const dt = Math.min(.05, Math.max(0, (now - autoLastTime) / 1000));
-    autoLastTime = now;
+    const dt = Math.min(.25, Math.max(0, (now - autoLastTime) / 1000));
+    autoLastTime = now;   // 掉帧时按真实时间补足，速度不会跟着帧率变慢
     const memoryIndex = pages.indexOf(memoryPage);
     const page = pagesM[memoryIndex];
-    if (page && active === memoryIndex && viewer.hidden && now >= autoPauseUntil && !gliding) {
+    if (page && active === memoryIndex && viewer.hidden && !looping && !gliding && !touching
+        && now >= autoPauseUntil && !document.body.classList.contains('is-home') && !document.hidden) {
       const min = page.top;
       const max = page.top + Math.max(0, page.h - deck.clientHeight);
-      if (max - min > 2) {
-        if (autoDirection > 0 && deck.scrollTop >= max - 2) autoDirection = -1;
-        else if (autoDirection < 0 && deck.scrollTop <= min + 2) autoDirection = 1;
-        const next = clamp(deck.scrollTop + autoDirection * 24 * dt, min, max);
-        if (Math.abs(next - deck.scrollTop) > .01) {
-          autoMoving = true;
-          autoScrollEventUntil = now + 80;
-          deck.scrollTop = next;
-          autoMoving = false;
-          render();
+      const st = deck.scrollTop;
+      // 只在照片墙范围内自动滚动；已经跳到别的页（render 还没跟上）就不动
+      if (max - min > 2 && st >= min - 2 && st <= max + 2) {
+        if (st >= max - 1) loopMemories(page, max);
+        else {
+          if (autoPos === null || Math.abs(autoPos - st) > 2) autoPos = st;
+          setAutoScroll(clamp(autoPos + AUTO_SPEED * dt, min, max));
         }
       }
     }
     requestAnimationFrame(autoScroll);
   };
   requestAnimationFrame(autoScroll);
-  const pauseAutoScroll = () => { autoPauseUntil = performance.now() + 2600; };
-  memoryGrid.addEventListener('pointerenter', () => { autoPauseUntil = Infinity; });
-  memoryGrid.addEventListener('pointerleave', pauseAutoScroll);
+  const pauseAutoScroll = () => { autoPauseUntil = performance.now() + AUTO_RESUME; autoPos = null; };
+  // 鼠标在照片上移动时暂停一会儿，停住不动就继续滚，不会一直卡住
+  memoryGrid.addEventListener('pointermove', e => { if (e.pointerType === 'mouse') pauseAutoScroll(); }, { passive: true });
   deck.addEventListener('pointerdown', pauseAutoScroll, { passive: true });
   deck.addEventListener('touchstart', pauseAutoScroll, { passive: true });
   deck.addEventListener('wheel', pauseAutoScroll, { passive: true });
@@ -628,26 +642,24 @@
     const b = e.target.closest('[data-page]');
     if (b) go(+b.dataset.page);
   });
-  $('.hud__brand').addEventListener('click', e => { e.preventDefault(); go(0); });
-  $('#topBtn').addEventListener('click', () => go(0));
+  $('.hud__brand').addEventListener('click', e => { e.preventDefault(); showHome(); });
+  $('#topBtn').addEventListener('click', () => showHome());
   $('#endBtn').addEventListener('click', () => { paintEnd(); openViewer(); });
 
   addEventListener('keydown', e => {
     if (!viewer.hidden) return;                 // 详情层自己处理按键
+    if (document.body.classList.contains('is-home')) return;
     if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
     if (e.target.closest && e.target.closest('button, a, input, textarea, select, [contenteditable]')) return;
     if (pages[active]?.hasAttribute('data-scrollable')) pauseAutoScroll();
-    const secondTop = pagesM[1]?.top || 0;
     const scrollAmount = e.key === 'PageDown' || e.key === 'PageUp' || e.key === ' ' || e.key === 'Spacebar'
       ? deck.clientHeight * .86 : 110;
     switch (e.key) {
       case 'ArrowDown': case 'PageDown': case ' ': case 'Spacebar':
-        if (active === 0) go(1);
-        else { e.preventDefault(); deck.scrollBy({ top: scrollAmount, behavior: 'smooth' }); }
+        e.preventDefault(); deck.scrollBy({ top: scrollAmount, behavior: 'smooth' });
         break;
       case 'ArrowUp': case 'PageUp':
-        if (active === 1 && deck.scrollTop <= secondTop + 3) go(0);
-        else { e.preventDefault(); deck.scrollBy({ top: -scrollAmount, behavior: 'smooth' }); }
+        e.preventDefault(); deck.scrollBy({ top: -scrollAmount, behavior: 'smooth' });
         break;
       case 'ArrowRight': e.preventDefault(); step(1); break;
       case 'ArrowLeft': e.preventDefault(); step(-1); break;
@@ -671,7 +683,8 @@
     if (!hash) return;
     const alias = hash === '#p-food' || hash === '#p-play';
     const i = pages.findIndex(p => '#' + p.id === (alias ? '#p-memories' : hash));
-    if (i > 0) {
+    if (i >= 0) {
+      if (document.body.classList.contains('is-home')) enterStage(pages[i].id, false);
       if (alias) {
         const filter = $('[data-memory-filter="' + (hash === '#p-food' ? 'food' : 'play') + '"]');
         if (filter) filter.click();
@@ -683,9 +696,70 @@
   };
   requestAnimationFrame(() => fromHash(initialHash));
   addEventListener('hashchange', () => fromHash());
-  setTimeout(countUp, 420);
+  if (document.body.classList.contains('is-home')) setTimeout(countUp, 420);
   // 兜底：后台标签页 / 慢设备上 rAF 可能停在半路
   setTimeout(() => { countStop = true; recount(); }, 2600);
+
+
+  /* ══════════════ 外层首页 ⇄ 内层展厅 ══════════════ */
+  // 首页是独立的一层；点「开始回忆」后首页淡出、展厅淡入，从「去过的地方」开始。
+  const body = document.body;
+  const home = $('#home');
+  const stage = $('#stage');
+  const FADE = reduce ? 0 : 560;
+  let fadeTimer = 0;
+  $('#homePlaces').textContent = String(places.length);
+  $('#homeMoments').textContent = String(memoryEntries.length);
+  const paintNext = () => {
+    const next = DATES.filter(d => d.mode === 'annual').map(d => ({ d, c: countdown(d) }))
+      .sort((a, b) => (a.c.isToday ? -1 : +a.c.n) - (b.c.isToday ? -1 : +b.c.n))[0];
+    if (!next) return;
+    $('#homeNext').textContent = String(next.c.n);
+    $('#homeNextUnit').textContent = next.c.unit;
+    $('#homeNextName').textContent = '距' + next.d.name;
+  };
+  paintNext();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) paintNext(); });
+
+  const setInert = (el, on) => { el.inert = on; on ? el.setAttribute('aria-hidden', 'true') : el.removeAttribute('aria-hidden'); };
+  setInert(stage, true);
+
+  function enterStage(id = 'p-places', animate = true) {
+    if (!body.classList.contains('is-home')) return;
+    clearTimeout(fadeTimer);
+    const i = Math.max(0, pages.findIndex(p => p.id === id));
+    body.classList.add('is-leaving');
+    fadeTimer = setTimeout(() => {
+      body.classList.remove('is-home', 'is-leaving');
+      setInert(home, true);
+      setInert(stage, false);
+      measure();
+      go(i, false);
+      active = -1;
+      render();
+      try { history.replaceState(null, '', '#' + pages[i].id); } catch (e) { /* file:// */ }
+      deck.focus({ preventScroll: true });
+    }, animate ? FADE : 0);
+  }
+  function showHome() {
+    if (body.classList.contains('is-home')) return;
+    clearTimeout(fadeTimer);
+    closeViewer();
+    body.classList.add('is-returning');
+    fadeTimer = setTimeout(() => {
+      body.classList.add('is-home');
+      body.classList.remove('is-returning');
+      setInert(stage, true);
+      setInert(home, false);
+      try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* file:// */ }
+      $('#startBtn').focus({ preventScroll: true });
+    }, FADE);
+  }
+  home.addEventListener('click', e => {
+    const b = e.target.closest('[data-enter]');
+    if (b) enterStage(b.dataset.enter);
+  });
+  window.__home = { enter: enterStage, show: showHome };
 
   /* ══════════════ 详情层 ══════════════ */
   const viewer = document.createElement('div');
