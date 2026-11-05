@@ -209,7 +209,7 @@
     <button class="memory-card glass glass--tilt" type="button" data-${kind}="${index}"
       data-memory-kind="${kind}" data-memory-card aria-label="查看${kind === 'food' ? '吃饭' : '游玩'}回忆：${esc(item.title)}"
       style="--memory-order:${position}">
-      <span class="memory-card__image"><img src="${esc(item.src)}" alt="${esc(item.title)}" loading="lazy" decoding="async"></span>
+      <span class="memory-card__image"><img src="${esc(item.src)}" alt="${esc(item.title)}" loading="${position < 4 ? 'eager' : 'lazy'}" decoding="async"></span>
       <span class="memory-card__info info-block">
         <span class="memory-card__meta"><span>${kind === 'food' ? 'AT THE TABLE' : 'OUT & ABOUT'}</span><span>${pad2(item.n || index + 1)}</span></span>
         <h3>${esc(item.title)}</h3>
@@ -235,12 +235,33 @@
     if (!memoryLayoutFrame) memoryLayoutFrame = requestAnimationFrame(layoutMemories);
   };
   memoryGrid.querySelectorAll('img').forEach(img => {
-    img.addEventListener('load', queueMemoryLayout, { once: true });
-    img.addEventListener('error', queueMemoryLayout, { once: true });
+    const done = () => {
+      // 图片到位后撤掉占位高度，卡片回到图片的自然高度
+      if (img.naturalWidth > 0 && img.parentElement) img.parentElement.classList.add('is-loaded');
+      queueMemoryLayout();
+    };
+    if (img.complete) done();
+    img.addEventListener('load', done, { once: true });
+    img.addEventListener('error', done, { once: true });
   });
   if ('ResizeObserver' in window) {
     const memoryObserver = new ResizeObserver(queueMemoryLayout);
     memoryCards.forEach(card => memoryObserver.observe(card));
+  }
+
+  // 手机 Safari / Chrome 的原生懒加载在滚动容器里不一定可靠：
+  // 卡片一进到「视口 + 800px」就手动改成 eager 并把地址重新塞一次，保证它真的开始下载
+  if ('IntersectionObserver' in window) {
+    const near = new IntersectionObserver(entries => {
+      entries.forEach(({ isIntersecting, target }) => {
+        if (!isIntersecting) return;
+        near.unobserve(target);
+        const img = target.querySelector('img');
+        if (!img || img.complete) return;
+        img.loading = 'eager';        // 只改标记，不重设 src，避免把已经在传的请求打断
+      });
+    }, { root: document.getElementById('deck'), rootMargin: '800px 0px' });
+    memoryCards.forEach(card => near.observe(card));
   }
   const updateMemoryCount = () => {
     const visible = memoryCards.reduce((n, card) => n + !card.hidden, 0);

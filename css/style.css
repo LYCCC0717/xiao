@@ -837,7 +837,11 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--blue-2); outlin
   transform-origin: 50% 60%;
 }
 .memory-card[hidden] { display: none; }
-.memory-card__image { display: block; overflow: hidden; border-radius: 17px; background: rgba(216,193,148,.3); }
+/* 图片没来之前先给个占位高度：高度为 0 的盒子永远不会触发 loading="lazy"，
+   手机上就会出现「一张都不加载」。图片加载完立刻撤掉占位，恢复自然高度。 */
+.memory-card__image { display: block; overflow: hidden; border-radius: 17px; background: rgba(216,193,148,.3);
+  min-height: clamp(170px, 42vw, 260px); }
+.memory-card__image.is-loaded { min-height: 0; }
 .memory-card__image img { display: block; width: 100%; height: auto; object-fit: contain; transition: filter .3s; }
 .memory-card__info { display: block; margin-top: 10px; padding: 16px; border-radius: 16px; background: rgba(255, 252, 241, .58); box-shadow: inset 0 1px 0 rgba(255,255,255,.7); }
 .memory-card__meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; color: #8d714e; font-size: 10px; letter-spacing: .05em; }
